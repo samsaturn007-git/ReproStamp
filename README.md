@@ -1,6 +1,6 @@
-# BuildVerify AI
+# ReproStamp
 
-BuildVerify AI compares two Git commits against the same independently maintained browser tests. The local CLI reproduces a checkout discount bug on the base commit, verifies the fix on the candidate, and checks ordinary checkout in Chromium.
+ReproStamp compares two Git commits against the same independently maintained browser tests. The local CLI reproduces a checkout discount bug on the base commit, verifies the fix on the candidate, and checks ordinary checkout in Chromium.
 
 ## Local setup
 
@@ -11,16 +11,16 @@ Use Git, Python 3.12+, Node.js 22.12+ with npm, and a running local Docker engin
 .venv/bin/python scripts/prepare-checkout.py
 ```
 
-Setup installs `bverify` in `.venv` and checks that Chromium can load a loopback page in the pinned Playwright image. The fixture script creates the same two Git commits on each run and prewarms a dedicated npm cache for the app and harness inside the pinned Linux image. Provisioning can download public packages and the image. Comparisons use the local cache and loopback-only networking. [Playwright Docker documentation](https://playwright.dev/docs/docker) · [Docker none network driver](https://docs.docker.com/engine/network/drivers/none/)
+Setup installs `reprostamp` in `.venv` and checks that Chromium can load a loopback page in the pinned Playwright image. The fixture script creates the same two Git commits on each run and prewarms a dedicated npm cache for the app and harness inside the pinned Linux image. Provisioning can download public packages and the image. Comparisons use the local cache and loopback-only networking. [Playwright Docker documentation](https://playwright.dev/docs/docker) · [Docker none network driver](https://docs.docker.com/engine/network/drivers/none/)
 
 ## Verify the checkout fix
 
 ```sh
-.venv/bin/bverify compare \
-  --repo .buildverify/checkout/repo \
+.venv/bin/reprostamp compare \
+  --repo .reprostamp/checkout/repo \
   --base checkout-base --head checkout-fixed \
   --profile profiles/checkout.json \
-  --out ".buildverify/results/checkout-$(date +%Y%m%d-%H%M%S)"
+  --out ".reprostamp/results/checkout-$(date +%Y%m%d-%H%M%S)"
 ```
 
 Use a fresh `--out` directory for each comparison. The CLI resolves both refs to commit SHAs and runs each commit twice. In the fixture, the base applies `SAVE10` and charges `$110.00` instead of `$90.00`. The candidate charges `$90.00`, and both commits still charge `$100.00` without a promo code. Open `result.json` in the output directory for case outcomes and relative paths to the failure screenshots, Playwright traces, and attempt logs.
@@ -50,15 +50,15 @@ Run setup with `--all-browsers` to smoke-test Chromium, Firefox, and WebKit. The
 ```sh
 ./scripts/setup.sh --all-browsers
 .venv/bin/python scripts/prepare_fixture.py shipping
-.venv/bin/bverify compare \
-  --repo .buildverify/shipping/repo \
+.venv/bin/reprostamp compare \
+  --repo .reprostamp/shipping/repo \
   --base shipping-base --head shipping-fixed \
   --profile profiles/shipping.json \
-  --out ".buildverify/results/shipping-$(date +%Y%m%d-%H%M%S)"
+  --out ".reprostamp/results/shipping-$(date +%Y%m%d-%H%M%S)"
 ```
 
 At exactly `$50.00`, the base shows a `$6.00` shipping fee and the candidate shows `$0.00`. Both charge `$6.00` at `$49.99`. The provisioner copies the owner-managed shipping test and shared runner files into a versioned harness snapshot outside the application repo.
 
 The [PRD-02 specification](docs/prds/PRD-02-receipt-and-replay.md) covers the browser matrix, Verification Receipt, and offline commands. See [implementation status](docs/IMPLEMENTATION_STATUS.md) for the setup results and exit-gate requirements.
 
-The [product plan](docs/PRODUCT_PLAN.md) lists all eight PRDs and their dependencies. The [original PRD pack](docs/reference/buildverify_prd_pack/README.md) is retained for reference.
+The [product plan](docs/PRODUCT_PLAN.md) lists all eight PRDs and their dependencies. The [original PRD pack](docs/reference/original_prd_pack/README.md) is retained for reference.

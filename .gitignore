@@ -12,6 +12,8 @@ node_modules/
 dist/
 test-results/
 playwright-report/
+.reprostamp/
+# Historical run data from before the rename.
 .buildverify/
 
 .env

@@ -3,14 +3,14 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "buildverify"
+name = "reprostamp"
 version = "0.1.0"
 description = "Compare Git commits using the same independent browser tests"
 requires-python = ">=3.12"
 dependencies = []
 
 [project.scripts]
-bverify = "buildverify.cli:main"
+reprostamp = "reprostamp.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

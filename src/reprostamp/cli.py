@@ -29,7 +29,7 @@ def compare(args: argparse.Namespace) -> int:
         out.mkdir(mode=0o700, parents=True, exist_ok=False)
         out = out.resolve()
     except (OSError, RuntimeError) as error:
-        print(f"bverify: --out must be a new directory ({error})", file=sys.stderr)
+        print(f"reprostamp: --out must be a new directory ({error})", file=sys.stderr)
         return 2
 
     run_id = uuid.uuid4().hex
@@ -51,7 +51,7 @@ def compare(args: argparse.Namespace) -> int:
         result["changed_paths"] = changed_paths(base_entries, head_entries, profile)
 
         print(f"Comparing {base} → {head}", flush=True)
-        with tempfile.TemporaryDirectory(prefix=f"bverify-{run_id}-") as temp:
+        with tempfile.TemporaryDirectory(prefix=f"reprostamp-{run_id}-") as temp:
             workspace = Path(temp).resolve()
             harness = workspace / "harness"
             freeze_harness(profile.harness, harness)
@@ -94,7 +94,7 @@ def compare(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="bverify", description="Compare commits using independent browser tests.")
+    parser = argparse.ArgumentParser(prog="reprostamp", description="Compare commits using independent browser tests.")
     commands = parser.add_subparsers(dest="command", required=True)
     command = commands.add_parser("compare", help="verify a candidate commit against a base commit")
     command.add_argument("--repo", required=True, help="approved local Git checkout")

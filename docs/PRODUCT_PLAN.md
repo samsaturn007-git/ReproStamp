@@ -1,8 +1,8 @@
-# BuildVerify AI product plan
+# ReproStamp product plan
 
 Start with a local verifier that runs the same independently maintained browser test against two Git commits. A patch may come from any author. The dashboard, GitHub integration, and AI suggestions build on the verifier.
 
-This plan and the numbered PRDs define the active build sequence. The [original PRD pack](reference/buildverify_prd_pack/README.md) is retained for background and design details.
+This plan and the numbered PRDs define the active build sequence. The [original PRD pack](reference/original_prd_pack/README.md) is retained for background and design details.
 
 ## Shared implementation decisions
 
@@ -27,7 +27,7 @@ This plan and the numbered PRDs define the active build sequence. The [original 
 
 ## Prior product research
 
-| Reference | What it already does | BuildVerify’s product decision |
+| Reference | What it already does | ReproStamp’s product decision |
 |---|---|---|
 | GitHub Copilot and OpenHands | Copilot can work on repository changes and open PRs. OpenHands offers a modular agent SDK. | Make verification available to any patch author. Add a narrowly scoped AI suggestion workflow after the verifier ships. [GitHub Copilot cloud agent](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/cloud-agent/use-cloud-agent-on-github) · [OpenHands SDK](https://github.com/OpenHands/software-agent-sdk) |
 | Playwright | Runs Chromium, Firefox, and WebKit, captures inspectable traces, and offers agents that can generate and heal tests. | Reuse Playwright and give the reviewer a side-by-side comparison using the same locked test. A patch that changes the acceptance criteria requires a new verification run with independently approved criteria. [Browsers](https://playwright.dev/docs/browsers) · [Trace Viewer](https://playwright.dev/docs/trace-viewer) · [Test agents](https://playwright.dev/docs/test-agents) |
@@ -40,6 +40,6 @@ The differentiators to build and demonstrate are **a replayable Verification Rec
 
 Give Codex the shared implementation decisions, **one numbered PRD**, and the current implementation status. Replace `PRD-01` with the next number only when its dependencies have passed.
 
-> Implement only PRD-01. Inspect the current workspace and follow the shared BuildVerify decisions. Work through this PRD’s numbered steps in order, run the exit-gate checks, and record commands, actual results, and any blocked checks in `docs/IMPLEMENTATION_STATUS.md`. Stop at this PRD’s exit gate and report which criteria passed.
+> Implement only PRD-01. Inspect the current workspace and follow the shared ReproStamp decisions. Work through this PRD’s numbered steps in order, run the exit-gate checks, and record commands, actual results, and any blocked checks in `docs/IMPLEMENTATION_STATUS.md`. Stop at this PRD’s exit gate and report which criteria passed.
 
 For the first portfolio demo, use **one real failed checkout trace, one verified patch, one runnable receipt replay, and one worker-recovery recording**. Use the observed results and their sample sizes in the README and resume.

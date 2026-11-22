@@ -9,7 +9,7 @@ async function main() {
         signal: AbortSignal.timeout(500),
       });
       if (response.ok) {
-        console.log('BuildVerify app is ready');
+        console.log('ReproStamp app is ready');
         return;
       }
     } catch (error) {

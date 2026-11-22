@@ -1,7 +1,7 @@
 const { writeFileSync } = require('node:fs');
 const { relative } = require('node:path');
 
-module.exports = class BuildVerifyReporter {
+module.exports = class ReproStampReporter {
   cases = [];
   errors = [];
 
@@ -10,7 +10,7 @@ module.exports = class BuildVerifyReporter {
   }
 
   onTestEnd(test, result) {
-    const annotation = result.annotations.find(({ type }) => type === 'bverify.assertion');
+    const annotation = result.annotations.find(({ type }) => type === 'reprostamp.assertion');
     const assertion = annotation ? JSON.parse(annotation.description) : null;
     const artifacts = {};
     for (const { name, path } of result.attachments) {

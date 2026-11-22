@@ -8,7 +8,7 @@ async function assertFee(page, testInfo, subtotal, id, expected) {
     expect(actual).toBe(expected);
   } catch (error) {
     testInfo.annotations.push({
-      type: 'bverify.assertion',
+      type: 'reprostamp.assertion',
       description: JSON.stringify({ id, actual, expected }),
     });
     throw error;

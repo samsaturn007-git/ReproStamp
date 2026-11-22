@@ -24,8 +24,8 @@ def git(repo: Path, *args: str) -> str:
         GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1", GIT_ATTR_NOSYSTEM="1",
     )
     return subprocess.run(
-        ["git", "-C", str(repo), "-c", "user.name=BuildVerify Fixture", "-c",
-         "user.email=fixture@buildverify.invalid", "-c", "core.hooksPath=/dev/null", *args],
+        ["git", "-C", str(repo), "-c", "user.name=ReproStamp Fixture", "-c",
+         "user.email=fixture@reprostamp.invalid", "-c", "core.hooksPath=/dev/null", *args],
         env=env, check=True, stdout=subprocess.PIPE, text=True,
     ).stdout.strip()
 
@@ -74,7 +74,7 @@ def fixture_commits(destination: Path, fixture: str) -> tuple[str, str]:
 def warm_cache(image: str, cache: Path, *packages: Path) -> None:
     cache.mkdir(parents=True, exist_ok=True)
     for package in packages:
-        with tempfile.TemporaryDirectory(prefix="buildverify-locks-") as temp:
+        with tempfile.TemporaryDirectory(prefix="reprostamp-locks-") as temp:
             inputs = Path(temp).resolve()
             inputs.chmod(0o755)
             for name in ("package.json", "package-lock.json"):
@@ -142,6 +142,6 @@ def prepare(fixture: str) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Provision an owned BuildVerify fixture and its npm cache.")
+    parser = argparse.ArgumentParser(description="Provision an owned ReproStamp fixture and its npm cache.")
     parser.add_argument("fixture", choices=COMMIT_MESSAGES)
     prepare(parser.parse_args().fixture)

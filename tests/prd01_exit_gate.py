@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CLI = Path(sys.executable).parent / "bverify"
+CLI = Path(sys.executable).parent / "reprostamp"
 BASE = "checkout-base"
 FIXED = "checkout-fixed"
 
@@ -29,7 +29,7 @@ class Scenario:
 
 def git(repo: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", "-C", str(repo), "-c", "user.name=BuildVerify Test", "-c", "user.email=test@buildverify.invalid",
+        ["git", "-C", str(repo), "-c", "user.name=ReproStamp Test", "-c", "user.email=test@reprostamp.invalid",
          "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", *args],
         check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30,
     ).stdout.strip()
@@ -84,10 +84,10 @@ def compare(repo: Path, profiles: Path, outputs: Path, scenario: Scenario, profi
 
     run_id = result["run_id"]
     containers = subprocess.check_output(
-        ["docker", "ps", "-aq", "--filter", f"label=io.buildverify.run={run_id}"], text=True, timeout=15,
+        ["docker", "ps", "-aq", "--filter", f"label=io.reprostamp.run={run_id}"], text=True, timeout=15,
     )
     assert not containers.strip(), f"Still present: {containers}"
-    assert not list(Path(tempfile.gettempdir()).glob(f"bverify-{run_id}-*")), "Temporary workspace leaked."
+    assert not list(Path(tempfile.gettempdir()).glob(f"reprostamp-{run_id}-*")), "Temporary workspace leaked."
     print(f"PASS {scenario.name} ({scenario.code}) {scenario.verdict} [{scenario.reason}]", flush=True)
     return result
 
@@ -96,7 +96,7 @@ def main() -> None:
     original = json.loads((ROOT / "profiles/checkout.json").read_text(encoding="utf-8"))
     for key in ("repository", "harness", "npm_cache"):
         original[key] = str((ROOT / "profiles" / original[key]).resolve())
-    outputs = Path(tempfile.mkdtemp(prefix="prd01-gates-", dir=ROOT / ".buildverify"))
+    outputs = Path(tempfile.mkdtemp(prefix="prd01-gates-", dir=ROOT / ".reprostamp"))
     print(f"Evidence directory: {outputs}", flush=True)
     with tempfile.TemporaryDirectory(prefix="prd01-inputs-") as temp:
         inputs = Path(temp).resolve()
@@ -166,7 +166,7 @@ def main() -> None:
         assert all(attempt["reason"] == "attempt_timeout" for attempt in result["attempts"])
         for attempt in result["attempts"]:
             logs = outputs / timeout.name / attempt["logs"]["harness"]
-            assert "BuildVerify app is ready" in logs.read_text(encoding="utf-8"), logs
+            assert "ReproStamp app is ready" in logs.read_text(encoding="utf-8"), logs
         print("PASS all four timeout workloads reached app readiness before being removed", flush=True)
 
     print(f"PRD-01 exit gates passed. Evidence: {outputs}")

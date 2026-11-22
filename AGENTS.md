@@ -1,4 +1,4 @@
-# BuildVerify AI
+# ReproStamp
 
 Read [README.md](README.md), [the product plan](docs/PRODUCT_PLAN.md), [implementation status](docs/IMPLEMENTATION_STATUS.md), and the requested PRD before making changes. The numbered PRDs define the active scope and build order. The original PRD pack under `docs/reference/` is background material.
 

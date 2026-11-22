@@ -1,2 +1,2 @@
-docs/reference/buildverify_prd_pack/** -text whitespace=-blank-at-eof,-blank-at-eol
+docs/reference/original_prd_pack/** -text whitespace=-blank-at-eof,-blank-at-eol
 fixtures/**/fix.patch whitespace=-blank-at-eol

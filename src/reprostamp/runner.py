@@ -111,7 +111,7 @@ def docker(*args: str, timeout: float, merge_stderr: bool = False) -> str:
 
 def container_args(name: str, network: str, run_id: str, source: Path, cache: Path) -> list[str]:
     return [
-        "--name", name, "--label", f"io.buildverify.run={run_id}",
+        "--name", name, "--label", f"io.reprostamp.run={run_id}",
         "--network", network, "--pull=never", "--init", "--user=pwuser", "--read-only",
         "--cap-drop=ALL", "--security-opt=no-new-privileges", "--cpus=2", "--memory=1g",
         "--pids-limit=256", "--shm-size=256m", "--log-driver=local", "--log-opt=max-size=1m",
@@ -188,7 +188,7 @@ def run_attempt(
     evidence = work_root / f"{side}-{number}"
     evidence.mkdir()
     evidence.chmod(0o777)  # Writable by pwuser inside a bind whose host parent is private.
-    prefix = f"bverify-{uuid.uuid4().hex}"
+    prefix = f"reprostamp-{uuid.uuid4().hex}"
     app_name, harness_name = f"{prefix}-app", f"{prefix}-harness"
     cache = profile.npm_cache / "_cacache"
     containers = {}
