@@ -44,3 +44,19 @@ The fixture tags resolve to `1c3bc345870aa77ac9a3d3c3fc1d40134437c7bd` (`checkou
 The four timeout attempts reached app readiness and then hit the 8-second deadline. Docker reported no remaining attempt containers and the host had no remaining comparison workspace. All policy-blocked runs recorded zero attempts.
 
 No PRD-01 exit checks remain open. [PRD-02](prds/PRD-02-receipt-and-replay.md) is ready to start.
+
+## PRD-02 readiness
+
+Setup verified on 22–23 November 2026. PRD-01 is checkpointed locally at `bd538dd`. [PRD-02 requirements](prds/PRD-02-receipt-and-replay.md)
+
+| Command | Observed result |
+| --- | --- |
+| `.venv/bin/python tests/prd01_exit_gate.py` | All 10 scenarios passed on repeat, including cleanup after four timed-out workloads. Results are in `.buildverify/prd01-gates-xgq8j9s0/`. |
+| `./scripts/setup.sh --all-browsers` | All three engines loaded a loopback page as a non-root user in the pinned Linux ARM64 image. The observed versions were Chromium `159.0.8154.6`, Firefox `159.0`, and WebKit `27.2`. Firefox launched after the smoke container used a writable temporary home, matching the comparison runner. |
+| `.venv/bin/python scripts/prepare-checkout.py` | Confirmed the existing checkout SHAs and refreshed its npm cache. |
+| `.venv/bin/python scripts/prepare_fixture.py shipping` | Prepared the second owned Git repo and its isolated harness and npm cache. Repeating setup produced the same `shipping-base` (`1949a6cd421e91bb51da7a8ac12b33331e9725b9`) and `shipping-fixed` (`8fb86e5e45d7cd57d32e26ce7a60b449ae42dfc8`). |
+| `.venv/bin/bverify compare --repo .buildverify/shipping/repo --base shipping-base --head shipping-fixed --profile profiles/shipping.json --out .buildverify/prd02-shipping-preflight` | `VERIFIED`, exit `0`. Shipping at `$50.00` failed twice on the base and passed twice on the candidate. The `$49.99` regression passed four times. |
+
+Both fixtures were also provisioned and compared successfully from a fresh project copy with a new venv and empty fixture caches. No comparison containers remained after the checks.
+
+The shipping comparison is a Chromium onboarding check. The PRD-02 exit gate requires the three-engine comparison, receipt export and integrity checks, replay, and a run on both fixtures. There are no open prerequisites to start that work. [Receipt canonicalization standard](https://www.rfc-editor.org/rfc/rfc8785)

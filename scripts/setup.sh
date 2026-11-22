@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+smoke_browser=chromium
+if [[ $# -eq 1 && ${1:-} == --all-browsers ]]; then
+  smoke_browser=all
+elif [[ $# -ne 0 ]]; then
+  printf 'Usage: %s [--all-browsers]\n' "${0##*/}" >&2
+  exit 2
+fi
+
 root_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 smoke_dir="$root_dir/tools/runner-smoke"
 venv_dir="$root_dir/.venv"
@@ -32,13 +40,13 @@ fi
 
 npm --prefix "$smoke_dir" ci --prefer-offline --ignore-scripts --no-audit --no-fund --include=dev
 
-docker run --rm --init --pull=never --network=none --user=pwuser \
+docker run --rm --init --pull=never --network=none --user=pwuser --env=HOME=/tmp \
   --read-only --tmpfs /tmp:rw,nosuid,nodev,size=256m --shm-size=256m \
   --cap-drop=ALL --security-opt=no-new-privileges \
   --cpus=2 --memory=1g --pids-limit=256 \
   --mount "type=bind,source=$smoke_dir,target=/smoke,readonly" \
   --workdir /smoke "$image" \
-  node node_modules/@playwright/test/cli.js test chromium.spec.cjs \
-    --browser=chromium --workers=1 --timeout=20000 --reporter=list --output=/tmp/test-results
+  node node_modules/@playwright/test/cli.js test browsers.spec.cjs \
+    --browser="$smoke_browser" --workers=1 --timeout=20000 --reporter=list --output=/tmp/test-results
 
 "$venv_dir/bin/python" -m pip install --disable-pip-version-check -e "$root_dir"

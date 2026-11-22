@@ -3,7 +3,7 @@ const { createServer } = require('node:http');
 const { networkInterfaces } = require('node:os');
 const { expect, test } = require('@playwright/test');
 
-test('Chromium loads a page over container loopback', async ({ browser, page }) => {
+test('loads a page over container loopback', async ({ browser, browserName, page }) => {
   expect(process.getuid()).toBeGreaterThan(0);
   const interfaces = Object.values(networkInterfaces()).flat();
   expect(interfaces.every((address) => address.internal)).toBe(true);
@@ -19,7 +19,7 @@ test('Chromium loads a page over container loopback', async ({ browser, page }) 
     const { port } = server.address();
     await page.goto(`http://127.0.0.1:${port}/`);
     await expect(page.getByRole('heading')).toHaveText('BuildVerify runner ready');
-    console.log(`Chromium ${browser.version()} on ${process.platform}/${process.arch}`);
+    console.log(`${browserName} ${browser.version()} on ${process.platform}/${process.arch}`);
   } finally {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));

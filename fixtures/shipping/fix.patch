@@ -1,0 +1,11 @@
+diff --git a/src/shipping.ts b/src/shipping.ts
+--- a/src/shipping.ts
++++ b/src/shipping.ts
+@@ -1,6 +1,6 @@
+ const freeShippingThreshold = 5_000;
+ const standardShippingFee = 600;
+ 
+ export function shippingFee(subtotalInCents: number) {
+-  return subtotalInCents > freeShippingThreshold ? 0 : standardShippingFee;
++  return subtotalInCents >= freeShippingThreshold ? 0 : standardShippingFee;
+ }

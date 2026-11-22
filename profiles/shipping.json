@@ -1,0 +1,14 @@
+{
+  "repository": "../.buildverify/shipping/repo",
+  "harness": "../.buildverify/shipping/harness",
+  "npm_cache": "../.buildverify/shipping/npm-cache",
+  "runner_image": "mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579",
+  "expected_failure": {
+    "case_id": "shipping.free-at-threshold",
+    "assertion_id": "threshold_fee",
+    "baseline_actual": "$6.00"
+  },
+  "required_regressions": ["shipping.paid-below-threshold"],
+  "editable_paths": ["src/**"],
+  "timeout_seconds": 45
+}
