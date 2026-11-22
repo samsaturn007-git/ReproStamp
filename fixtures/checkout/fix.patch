@@ -1,0 +1,12 @@
+diff --git a/src/checkout.ts b/src/checkout.ts
+--- a/src/checkout.ts
++++ b/src/checkout.ts
+@@ -6,7 +6,7 @@ export function isValidPromo(code: string) {
+ }
+ 
+ export function checkoutTotal(subtotalInCents: number, promoApplied: boolean) {
+-  return promoApplied ? subtotalInCents + promoDiscount : subtotalInCents;
++  return promoApplied ? subtotalInCents - promoDiscount : subtotalInCents;
+ }
+ 
+ export function formatPrice(cents: number) {

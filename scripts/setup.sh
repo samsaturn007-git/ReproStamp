@@ -40,3 +40,5 @@ docker run --rm --init --pull=never --network=none --user=pwuser \
   --workdir /smoke "$image" \
   node node_modules/@playwright/test/cli.js test chromium.spec.cjs \
     --browser=chromium --workers=1 --timeout=20000 --reporter=list --output=/tmp/test-results
+
+"$venv_dir/bin/python" -m pip install --disable-pip-version-check -e "$root_dir"

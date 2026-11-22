@@ -1,0 +1,14 @@
+{
+  "repository": "../.buildverify/checkout/repo",
+  "harness": "../harness/checkout",
+  "npm_cache": "../.buildverify/npm-cache",
+  "runner_image": "mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579",
+  "expected_failure": {
+    "case_id": "checkout.discount",
+    "assertion_id": "discounted_total",
+    "baseline_actual": "$110.00"
+  },
+  "required_regressions": ["checkout.full-price"],
+  "editable_paths": ["src/**"],
+  "timeout_seconds": 45
+}
