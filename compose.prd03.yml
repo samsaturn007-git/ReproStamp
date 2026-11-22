@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:18.7-bookworm@sha256:1757c628698dd1ca67ff7a5fc386bfd91040afc62a45484c346c788b0cbe5402
+    environment:
+      POSTGRES_USER: reprostamp
+      POSTGRES_DB: reprostamp
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    ports:
+      - "127.0.0.1:${REPROSTAMP_PG_PORT:-55432}:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-q", "-h", "127.0.0.1", "-U", "reprostamp", "-d", "reprostamp"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - postgres_data:/var/lib/postgresql
+
+secrets:
+  postgres_password:
+    file: ./.reprostamp/prd03/postgres-password
+
+volumes:
+  postgres_data:

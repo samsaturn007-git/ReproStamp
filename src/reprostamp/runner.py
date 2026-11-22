@@ -6,14 +6,19 @@ import stat
 import subprocess
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .profile import PolicyError, Profile
 
 
-ENGINE = "chromium"
+RUNNER_CONTRACT = 1
+PROXY_VARIABLES = tuple(
+    case for variable in ("HTTP_PROXY", "HTTPS_PROXY", "FTP_PROXY", "NO_PROXY", "ALL_PROXY")
+    for case in (variable, variable.lower())
+)
 COPY_AND_INSTALL = (
+    f"unset {' '.join(PROXY_VARIABLES)}; "
     "cp -R /inputs/. /work/; mkdir -p /tmp/npm-cache; "
     "cp -R /npm-cache /tmp/npm-cache/_cacache; "
     "npm ci --offline --ignore-scripts --include=dev --no-audit --no-fund --cache /tmp/npm-cache; "
@@ -24,10 +29,7 @@ HARNESS_COMMAND = COPY_AND_INSTALL + (
 )
 ARTIFACT_NAMES = {"trace": "trace.zip", "screenshot": "screenshot.png"}
 HOME_OVERRIDES = ["--env=HOME=/tmp", "--env=CI=1"]
-PROXY_OVERRIDES = [
-    f"--env={case}=" for variable in ("HTTP_PROXY", "HTTPS_PROXY", "FTP_PROXY", "NO_PROXY", "ALL_PROXY")
-    for case in (variable, variable.lower())
-]
+PROXY_OVERRIDES = [f"--env={variable}=" for variable in PROXY_VARIABLES]
 
 
 class DockerError(RuntimeError):
@@ -53,6 +55,12 @@ class Case:
 
 
 @dataclass(frozen=True)
+class BrowserBuild:
+    version: str
+    platform: str
+
+
+@dataclass(frozen=True)
 class Attempt:
     side: str
     number: int
@@ -64,6 +72,7 @@ class Attempt:
     detail: str | None
     cases: list[Case]
     logs: dict[str, str]
+    browser_build: BrowserBuild | None
 
 
 def freeze_harness(source: Path, target: Path) -> None:
@@ -122,10 +131,21 @@ def container_args(name: str, network: str, run_id: str, source: Path, cache: Pa
     ]
 
 
-def read_cases(source: Path, output: Path, root: Path, profile: Profile) -> tuple[list[Case], str | None]:
+def read_report(
+    source: Path, output: Path, root: Path, profile: Profile, engine: str,
+) -> tuple[list[Case], BrowserBuild | None, str | None, str | None]:
     cases = []
+    build = None
     try:
         report = json.loads((source / "report.json").read_text(encoding="utf-8"))
+        builds = report.get("builds", [])
+        if builds:
+            if len(builds) != 1 or builds[0]["engine"] != engine:
+                raise ValueError(f"Expected one observed {engine} build, received {builds!r}.")
+            version, platform = builds[0]["version"], builds[0]["platform"]
+            if any(not isinstance(field, str) or not field.strip() for field in (version, platform)):
+                raise ValueError("Invalid browser build metadata.")
+            build = BrowserBuild(version, platform)
         seen = set()
         for entry in report["cases"]:
             case_id = entry["case_id"]
@@ -137,6 +157,8 @@ def read_cases(source: Path, output: Path, root: Path, profile: Profile) -> tupl
             if type(duration) is not int or duration < 0:
                 raise ValueError(f"Invalid duration for {case_id}.")
             status = "passed" if raw_status == "passed" else "error"
+            if raw_status == "skipped":
+                status = "missing"
             assertion = None
             if raw_status == "failed" and entry["assertion"] is not None:
                 marker = entry["assertion"]
@@ -147,8 +169,10 @@ def read_cases(source: Path, output: Path, root: Path, profile: Profile) -> tupl
                     raise ValueError(f"Invalid assertion in {case_id}.")
                 status = "assertion_failed"
             detail = None
-            if status == "error":
+            if status in ("missing", "error"):
                 detail = entry.get("error") or f"Playwright ended as {raw_status} without an assertion marker."
+                if build is None and "executable doesn't exist at" in detail.lower():
+                    status = "unsupported"
 
             artifacts = {}
             for kind, filename in ARTIFACT_NAMES.items():
@@ -163,29 +187,38 @@ def read_cases(source: Path, output: Path, root: Path, profile: Profile) -> tupl
                 artifacts[kind] = destination.relative_to(root).as_posix()
             cases.append(Case(case_id, status, raw_status, duration, assertion, artifacts, detail))
 
+        if any(case.status == "unsupported" for case in cases):
+            return cases, build, "required_engine_unsupported", f"The {engine} executable is unavailable in the runner."
+        missing = (profile.case_ids - seen) | {case.case_id for case in cases if case.status == "missing"}
+        if missing:
+            return cases, build, "required_cell_missing", f"Missing cases: {', '.join(sorted(missing))}."
         if report["status"] not in ("passed", "failed") or report["errors"]:
             raise ValueError(f"Playwright reported {report['status']}: {report['errors']}")
-        if seen != profile.case_ids:
-            raise ValueError(f"Missing cases: {', '.join(sorted(profile.case_ids - seen))}.")
         for case in cases:
             if case.status == "error":
                 raise ValueError(f"{case.case_id} ended as {case.playwright_status} without a completed assertion.")
             if case.status == "assertion_failed" and case.artifacts.keys() != ARTIFACT_NAMES.keys():
                 raise ValueError(f"{case.case_id} is missing a failure trace or screenshot.")
+        if build is None:
+            return cases, None, "browser_build_missing", f"The harness did not record the launched {engine} build."
     except (KeyError, OSError, TypeError, ValueError) as error:
-        return cases, str(error)
-    return cases, None
+        return cases, build, "harness_incomplete", str(error)
+    return cases, build, None, None
+
+
+def runner_platform(image: str) -> str:
+    return docker("image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", image, timeout=10).strip()
 
 
 def run_attempt(
-    profile: Profile, *, run_id: str, side: str, number: int, commit: str,
+    profile: Profile, *, run_id: str, side: str, number: int, commit: str, engine: str,
     app: Path, harness: Path, work_root: Path, out_root: Path,
 ) -> Attempt:
     started = time.monotonic()
     deadline = started + profile.timeout_seconds
-    output = out_root / side / f"attempt-{number}"
+    output = out_root / engine / side / f"attempt-{number}"
     output.mkdir(parents=True)
-    evidence = work_root / f"{side}-{number}"
+    evidence = work_root / f"{engine}-{side}-{number}"
     evidence.mkdir()
     evidence.chmod(0o777)  # Writable by pwuser inside a bind whose host parent is private.
     prefix = f"reprostamp-{uuid.uuid4().hex}"
@@ -214,6 +247,8 @@ def run_attempt(
                profile.runner_image, "sh", "-ec", APP_COMMAND)
         command("start", app_name)
         create("harness", harness_name, *container_args(harness_name, f"container:{app_name}", run_id, harness, cache),
+               f"--env=REPROSTAMP_ENGINE={engine}",
+               f"--env=REPROSTAMP_BROWSER_SETTINGS={json.dumps(asdict(profile.browser), ensure_ascii=False)}",
                "--mount", bind_mount(evidence, "/evidence", read_only=False),
                profile.runner_image, "sh", "-ec", HARNESS_COMMAND)
         command("start", harness_name)
@@ -245,12 +280,16 @@ def run_attempt(
     if reason is None and not (evidence / "report.json").is_file():
         reason = "runner_startup_failed" if exit_status == "1" else "harness_incomplete"
         detail = f"The harness exited with status {exit_status} without producing a report. See attempt logs."
-    cases, report_error = read_cases(evidence, output, out_root, profile) if (evidence / "report.json").is_file() else ([], None)
-    if reason is None and (report_error or exit_status not in ("0", "1")):
-        reason, detail = "harness_incomplete", report_error or f"Unexpected harness exit status {exit_status}."
+    cases, build, report_reason, report_detail = [], None, None, None
+    if (evidence / "report.json").is_file():
+        cases, build, report_reason, report_detail = read_report(evidence, output, out_root, profile, engine)
+    if reason is None:
+        reason, detail = report_reason, report_detail
+        if reason is None and exit_status not in ("0", "1"):
+            reason, detail = "harness_incomplete", f"Unexpected harness exit status {exit_status}."
     if cleanup_errors:
         reason, detail = "runner_cleanup_failed", "\n".join(cleanup_errors)
     return Attempt(
-        side, number, commit, ENGINE, "completed" if reason is None else "incomplete",
-        round((time.monotonic() - started) * 1000), reason, detail, cases, logs,
+        side, number, commit, engine, "completed" if reason is None else "incomplete",
+        round((time.monotonic() - started) * 1000), reason, detail, cases, logs, build,
     )

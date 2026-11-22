@@ -94,6 +94,7 @@ def compare(repo: Path, profiles: Path, outputs: Path, scenario: Scenario, profi
 
 def main() -> None:
     original = json.loads((ROOT / "profiles/checkout.json").read_text(encoding="utf-8"))
+    original["engines"] = ["chromium"]
     for key in ("repository", "harness", "npm_cache"):
         original[key] = str((ROOT / "profiles" / original[key]).resolve())
     outputs = Path(tempfile.mkdtemp(prefix="prd01-gates-", dir=ROOT / ".reprostamp"))

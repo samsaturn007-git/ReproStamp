@@ -60,3 +60,64 @@ Setup verified on 22–23 November 2026. PRD-01 is checkpointed locally at `bd53
 Both fixtures were also provisioned and compared successfully from a fresh project copy with a new venv and empty fixture caches. No comparison containers remained after the checks.
 
 The shipping comparison is a Chromium onboarding check. The PRD-02 exit gate requires the three-engine comparison, receipt export and integrity checks, replay, and a run on both fixtures. There are no open prerequisites to start that work. [Receipt canonicalization standard](https://www.rfc-editor.org/rfc/rfc8785)
+
+## PRD-02
+
+Implemented on 23 November 2026. The checkout and shipping profiles require Chromium, Firefox, and WebKit. Both use the same frozen harness and browser settings for every attempt within a comparison. The Verification Receipt records the immutable inputs, observed builds, case outcomes, verdicts, and approved artifact hashes. It is available as `receipt.json`, `receipt.md`, and `receipt.zip`. [PRD-02 requirements](prds/PRD-02-receipt-and-replay.md)
+
+| Command | Observed result |
+| --- | --- |
+| `./scripts/setup.sh --all-browsers` | Passed 3 smoke tests on Linux ARM64. Recorded Chromium `159.0.8154.6`, Firefox `159.0`, and WebKit `27.2`. |
+| `.venv/bin/python scripts/prepare_fixture.py shipping` | Rebuilt the independent shipping harness snapshot with the shared browser settings and reporter, warmed its npm cache, and confirmed both shipping SHAs. |
+| `.venv/bin/python tests/prd01_exit_gate.py` | Passed all 10 scenarios before PRD-02 changes, after adding the matrix and receipts, and from the fresh project copy. Four timeout workloads reached app readiness and were removed on each run. |
+| `.venv/bin/python tests/prd02_exit_gate.py` | Checkout and shipping each returned `VERIFIED`, exit `0`. Each run completed 12 attempts and 24 case executions. The expected assertion failed on all 6 base attempts, passed on all 6 candidate attempts, and the corresponding regression passed on all 12 attempts. Each bundle passed offline verification and contained 6 baseline traces and 6 screenshots. |
+| `verify` via `tests/prd02_exit_gate.py` | Returned exit `2` for a modified receipt, a same-size replacement trace, a missing artifact, an unsafe ZIP entry, and a malformed attempt with a recomputed manifest hash. |
+| `replay` via `tests/prd02_exit_gate.py` | Replayed all 12 checkout attempts using a separate Git clone and harness copy. The new receipt linked the original payload hash. A changed oracle and an unavailable pinned image each returned `INCONCLUSIVE`, exit `3`, with a specific reason and zero new attempts. |
+| `diff-receipts` via `tests/prd02_exit_gate.py` | Found matching inputs and no changed case outcomes for the replay. Aligned 6 changed candidate assertions against the ineffective run and flagged the changed oracle as a barrier to comparison. |
+| Required-cell scenarios via `tests/prd02_exit_gate.py` | A skipped Firefox case returned `INCONCLUSIVE` with `required_cell_missing`. An unavailable Firefox executable returned `INCONCLUSIVE` with `required_engine_unsupported`. Both exported valid receipts with the missing or unsupported cells labeled. |
+| `docker inspect` on live app and harness containers | Both ran as `pwuser` with read-only root filesystems. The harness shared the app's isolated network and was the only workload with writable evidence storage. |
+| `env PATH=/usr/bin:/bin .venv/bin/reprostamp verify .reprostamp/prd02-checkout-proxy-fix/receipt.zip` | Verified all 37 manifest files with Docker and Node.js excluded from `PATH`. |
+| README setup, fixture preparation, `compare`, `verify`, `replay`, and `diff-receipts` commands in a fresh project copy | Created a new venv and populated empty fixture caches. Checkout, checkout replay, and shipping each returned `VERIFIED`, exit `0`. Both bundle checks passed and the replay diff reported matching inputs and outcomes. |
+| `git diff --check` and `.venv/bin/python -m compileall -q src scripts tests` | Passed. |
+
+The first comparison attempts in WebKit exposed a proxy lookup failure when proxy variables were present with empty values. The runner now removes them before launching either workload, with the Docker network isolated throughout. Both fixture matrices passed after the change. The original inconclusive receipts remain in `.reprostamp/prd02-checkout-dev/` and `.reprostamp/prd02-shipping-dev/`.
+
+The repeated PRD-02 exit suite retained its checkout, shipping, and replay bundles in `.reprostamp/prd02-gates-hrrvrsck/`. It found no remaining attempt containers or temporary workspaces for the checked runs. No PRD-02 exit checks remain open.
+
+The PRD-03 readiness audit reran `.venv/bin/python tests/prd02_exit_gate.py` on 23 November 2026. All exit checks passed again. The new evidence is in `.reprostamp/prd02-gates-wxy_i8ut/`. `env PATH=/usr/bin:/bin .venv/bin/reprostamp verify .reprostamp/prd02-gates-wxy_i8ut/checkout/receipt.zip` also verified all 37 manifest files and reported the recorded `VERIFIED` verdict.
+
+The implementation audit on 23 November 2026 reran both dependency suites against the current workspace. `.venv/bin/python tests/prd01_exit_gate.py` passed all 10 scenarios and confirmed cleanup for the four timed-out workloads. `.venv/bin/python tests/prd02_exit_gate.py` passed the checkout and shipping matrices, independent replay, offline integrity checks, and missing or unsupported browser cases. Evidence is in `.reprostamp/prd01-gates-zzvjvhql/` and `.reprostamp/prd02-gates-msg6cmyw/`.
+
+## PRD-03 readiness
+
+Setup verified on 23 November 2026. The required PRD-02 exit gate passed. Docker Compose now provides a pinned local PostgreSQL service, the Python API stack installs as an optional extra, and the dashboard has a locked npm dependency tree. [PRD-03 requirements](prds/PRD-03-dashboard-and-durable-runs.md) · [Setup commands](../README.md#run-the-local-dashboard)
+
+| Command or check | Observed result |
+| --- | --- |
+| `docker buildx imagetools inspect postgres@sha256:1757c628698dd1ca67ff7a5fc386bfd91040afc62a45484c346c788b0cbe5402` | The pinned PostgreSQL 18.7 image index includes Linux ARM64 and AMD64. |
+| `.venv/bin/python scripts/setup_prd03.py` | Installed FastAPI `0.165.0`, Pydantic `2.14.4`, Uvicorn `0.54.0`, SQLAlchemy `2.1.9`, psycopg `3.3.9`, and Alembic `1.20.1`. Connected to PostgreSQL `18.7` through `127.0.0.1:55432`. Alembic reported no applied revisions. |
+| OpenAPI smoke check in `scripts/setup_prd03.py` | Next.js `16.4.6` started its CLI. `openapi-typescript` `7.13.0` generated declarations from a FastAPI OpenAPI document, and TypeScript `5.9.3` compiled a client using those declarations. |
+| PostgreSQL `SELECT ... FOR UPDATE SKIP LOCKED` over two connections | While one transaction held the first row, the second claimed the next row. The probe table was dropped. |
+| `.venv/bin/python scripts/setup_prd03.py --stop` followed by setup from the parent directory | The port stopped accepting connections. Setup restarted PostgreSQL with the same cluster identity and an empty application schema. The service was left healthy and bound to loopback. |
+| `.venv/bin/python -m pip check`, `docker compose --file compose.prd03.yml config --quiet`, and `git diff --check` | Passed. |
+
+## PRD-03
+
+Implemented on 23 November 2026. The local dashboard submits comparisons against registered repositories and profiles using an owner session and CSRF protection. PostgreSQL records execution states, attempts, events, and artifact references. Submission freezes the Git commits, profile, and independent harness. The worker retries once after lease expiry and publishes evidence only under the active fencing token. The dashboard resumes the timeline and displays case results, verdict reasons, and a 30-day evidence expiry. [Run the dashboard](../README.md#run-the-local-dashboard)
+
+| Command or check | Observed result |
+| --- | --- |
+| `.venv/bin/python scripts/setup_prd03.py` | Installed locked dependencies, connected to PostgreSQL 18.7, and generated and type-checked the dashboard client from the actual API schema. |
+| `.venv/bin/python -m reprostamp.control migrate` | Applied `0001_durable_runs`. A second invocation preserved the same revision. The integration suite applied it again to a separate empty database. |
+| `npm --prefix dashboard run build` | Production build and TypeScript checks passed. |
+| `.venv/bin/python tests/prd03_exit_gate.py` | The browser signed in, submitted checkout, disconnected after event 3, and recovered all 38 ordered events. The replacement for a killed worker used the original commits and harness after the registered inputs changed. It produced one `VERIFIED` receipt after 12 attempts and 24 case executions. A stale token could neither record progress nor finalize. Two worker losses on another run exhausted the single retry and left the run incomplete with no verdict or receipt. |
+| Access and retention checks in `tests/prd03_exit_gate.py` | Concurrent duplicate requests returned one run ID and a changed request with the same key returned 409. Queued and active cancellation kept the verdict empty. Anonymous downloads returned 401, traces were ZIP attachments, HTML in log text rendered as text, expired downloads returned 410, and the worker removed expired files. |
+| `env PATH=/usr/bin:/bin .venv/bin/reprostamp verify .reprostamp/prd03-gates-2sxvpxdl/ui-receipt.zip` | Verified all 37 manifest files without Docker or Node.js on `PATH`. A diff against the PRD-02 checkout receipt showed matching inputs and case outcomes. |
+| `npm --prefix dashboard run start` and a Playwright smoke check at `390 × 844` | The production build was reachable on loopback. The owner signed in, opened the completed checkout run, saw all 27 timeline events, and signed out. The page fit the viewport. |
+| `git diff --check`, `.venv/bin/python -m compileall -q src scripts tests`, `.venv/bin/python -m pip check`, and `docker compose --file compose.prd03.yml config --quiet` | Passed. |
+
+The first browser acceptance run exposed compression buffering on live events through the dashboard proxy. The SSE response now sends `no-transform`, and the browser verified that `Last-Event-ID` resumes delivery through the proxy.
+
+No PRD-03 exit checks remain open. The worker-recovery recording, screenshot, receipt, and trace are in `.reprostamp/prd03-gates-2sxvpxdl/`. The exit suite found no comparison containers left after recovery, cancellation, or exhausted retry.
+
+A fresh readiness audit on 23 November 2026 reran `.venv/bin/python tests/prd03_exit_gate.py` and `npm --prefix dashboard run build`. Both passed. The browser recovered 38 ordered events, the replacement worker produced one receipt, and the 37-file bundle passed `verify` with Node.js and Docker excluded from `PATH`. Evidence is in `.reprostamp/prd03-gates-e4l7w6ve/`.

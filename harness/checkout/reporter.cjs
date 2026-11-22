@@ -4,6 +4,7 @@ const { relative } = require('node:path');
 module.exports = class ReproStampReporter {
   cases = [];
   errors = [];
+  builds = new Set();
 
   onError(error) {
     this.errors.push(error.message);
@@ -12,6 +13,8 @@ module.exports = class ReproStampReporter {
   onTestEnd(test, result) {
     const annotation = result.annotations.find(({ type }) => type === 'reprostamp.assertion');
     const assertion = annotation ? JSON.parse(annotation.description) : null;
+    const build = result.annotations.find(({ type }) => type === 'reprostamp.browser');
+    if (build) this.builds.add(build.description);
     const artifacts = {};
     for (const { name, path } of result.attachments) {
       if (path && (name === 'screenshot' || name === 'trace')) {
@@ -34,6 +37,7 @@ module.exports = class ReproStampReporter {
       status,
       cases: this.cases,
       errors: this.errors,
+      builds: [...this.builds].map(value => JSON.parse(value)),
     }));
   }
 };

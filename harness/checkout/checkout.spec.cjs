@@ -1,4 +1,4 @@
-const { expect, test } = require('@playwright/test');
+const { expect, test } = require('./test.cjs');
 
 async function assertTotal(page, testInfo, id, expected) {
   const actual = await page.getByLabel('Order total').textContent({ timeout: 3_000 });

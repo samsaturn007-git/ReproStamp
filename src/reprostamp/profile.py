@@ -7,6 +7,7 @@ from pathlib import Path, PurePosixPath
 
 CASE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\Z")
 IMAGE = re.compile(r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}\Z")
+ENGINES = ("chromium", "firefox", "webkit")
 PROTECTED_FILES = {
     "package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock",
     "pnpm-lock.yaml", "bun.lock", "bun.lockb", ".npmrc", ".gitmodules",
@@ -29,6 +30,15 @@ class ExpectedFailure:
 
 
 @dataclass(frozen=True)
+class BrowserSettings:
+    seed: int = 42
+    viewport_width: int = 1100
+    viewport_height: int = 800
+    locale: str = "en-US"
+    timezone: str = "UTC"
+
+
+@dataclass(frozen=True)
 class Profile:
     harness: Path
     npm_cache: Path
@@ -37,6 +47,8 @@ class Profile:
     required_regressions: tuple[str, ...]
     editable_paths: tuple[str, ...]
     timeout_seconds: int
+    engines: tuple[str, ...]
+    browser: BrowserSettings
 
     @property
     def case_ids(self) -> frozenset[str]:
@@ -99,7 +111,18 @@ def load_profile(path: Path, repo: Path) -> Profile:
         timeout = data["timeout_seconds"]
         if type(timeout) is not int or not 1 <= timeout <= 120:
             raise ValueError("timeout_seconds must be an integer between 1 and 120.")
-    except (OSError, KeyError, ValueError, RuntimeError) as error:
+        engines = strings("engines") if "engines" in data else ("chromium",)
+        if len(set(engines)) != len(engines) or any(engine not in ENGINES for engine in engines):
+            raise ValueError("Choose distinct engines from chromium, firefox, and webkit.")
+        settings = BrowserSettings(**data.get("browser", {}))
+        if type(settings.seed) is not int or not 0 <= settings.seed < 2**32:
+            raise ValueError("The browser seed must be an unsigned 32-bit integer.")
+        for dimension in (settings.viewport_width, settings.viewport_height):
+            if type(dimension) is not int or not 1 <= dimension <= 4096:
+                raise ValueError("Browser viewport dimensions must be integers between 1 and 4096.")
+        for setting in ("locale", "timezone"):
+            nonempty_string(vars(settings), setting)
+    except (OSError, KeyError, TypeError, ValueError, RuntimeError) as error:
         raise PolicyError("invalid_profile", str(error)) from error
 
     if approved_repo != repo:
@@ -107,4 +130,4 @@ def load_profile(path: Path, repo: Path) -> Profile:
     if harness.is_relative_to(repo) or repo.is_relative_to(harness) or npm_cache.is_relative_to(repo):
         raise PolicyError("inputs_inside_repository", "Keep the harness and dependency cache outside the application tree.")
 
-    return Profile(harness, npm_cache, image, expected, regressions, patterns, timeout)
+    return Profile(harness, npm_cache, image, expected, regressions, patterns, timeout, engines, settings)

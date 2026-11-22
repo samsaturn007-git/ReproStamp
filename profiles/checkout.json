@@ -10,5 +10,13 @@
   },
   "required_regressions": ["checkout.full-price"],
   "editable_paths": ["src/**"],
+  "engines": ["chromium", "firefox", "webkit"],
+  "browser": {
+    "seed": 42,
+    "viewport_width": 1100,
+    "viewport_height": 800,
+    "locale": "en-US",
+    "timezone": "UTC"
+  },
   "timeout_seconds": 45
 }

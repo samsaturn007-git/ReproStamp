@@ -1,4 +1,5 @@
 const { defineConfig } = require('@playwright/test');
+const settings = JSON.parse(process.env.REPROSTAMP_BROWSER_SETTINGS);
 
 module.exports = defineConfig({
   testMatch: '**/*.spec.cjs',
@@ -10,11 +11,11 @@ module.exports = defineConfig({
   timeout: 10_000,
   use: {
     baseURL: 'http://127.0.0.1:4173',
-    browserName: 'chromium',
+    browserName: process.env.REPROSTAMP_ENGINE,
     headless: true,
-    locale: 'en-US',
-    timezoneId: 'UTC',
-    viewport: { width: 1100, height: 800 },
+    locale: settings.locale,
+    timezoneId: settings.timezone,
+    viewport: { width: settings.viewport_width, height: settings.viewport_height },
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
   },

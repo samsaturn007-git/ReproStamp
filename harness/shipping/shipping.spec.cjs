@@ -1,4 +1,4 @@
-const { expect, test } = require('@playwright/test');
+const { expect, test } = require('./test.cjs');
 
 async function assertFee(page, testInfo, subtotal, id, expected) {
   await page.goto('/');

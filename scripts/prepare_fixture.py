@@ -94,7 +94,7 @@ def warm_cache(image: str, cache: Path, *packages: Path) -> None:
 def prepare_shipping_harness(destination: Path, image: str, cache: Path, app_scaffold: Path) -> None:
     checkout = ROOT / "harness/checkout"
     shipping = ROOT / "harness/shipping"
-    names = ("package.json", "package-lock.json", "playwright.config.cjs", "reporter.cjs", "wait-for-app.cjs")
+    names = ("package.json", "package-lock.json", "playwright.config.cjs", "reporter.cjs", "test.cjs", "wait-for-app.cjs")
     inputs = [checkout / name for name in names] + [shipping / "shipping.spec.cjs"]
     files = {source.name: source.read_bytes() for source in inputs}
     digest = hashlib.sha256()
