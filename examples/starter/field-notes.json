@@ -1,0 +1,5 @@
+{
+  "project_name": "Field Notes",
+  "task_fields": ["description", "due_date", "priority"],
+  "statuses": ["To do", "In progress", "Done"]
+}

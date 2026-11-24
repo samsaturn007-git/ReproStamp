@@ -58,6 +58,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/repositories/{repo_id}/failures": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Failures */
+        get: operations["failures_api_v1_repositories__repo_id__failures_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/case-replays": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Replay Case */
+        post: operations["replay_case_api_v1_runs__run_id__case_replays_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}": {
         parameters: {
             query?: never;
@@ -69,6 +103,23 @@ export interface paths {
         get: operations["detail_api_v1_runs__run_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/visual-reviews/{route_id}/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Visual */
+        post: operations["approve_visual_api_v1_runs__run_id__visual_reviews__route_id__approval_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -164,6 +215,22 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AccessibilityReview */
+        AccessibilityReview: {
+            /** Required */
+            required: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "regression" | "passed" | "unavailable";
+            /** Detail */
+            detail: string | null;
+            /** Axe Version */
+            axe_version: string | null;
+            /** Findings */
+            findings: components["schemas"]["AxeFinding"][];
+        };
         /** Artifact */
         Artifact: {
             /**
@@ -203,11 +270,8 @@ export interface components {
              * @enum {string}
              */
             side: "base" | "head";
-            /**
-             * Number
-             * @enum {integer}
-             */
-            number: 1 | 2;
+            /** Number */
+            number: number;
             /**
              * State
              * @enum {string}
@@ -230,6 +294,15 @@ export interface components {
                 [key: string]: string;
             };
             browser_build: components["schemas"]["BrowserBuild"] | null;
+        };
+        /** AxeFinding */
+        AxeFinding: {
+            /** Rule */
+            rule: string;
+            /** Impact */
+            impact: ("minor" | "moderate" | "serious" | "critical") | null;
+            /** Target */
+            target: string;
         };
         /** BrowserBuild */
         BrowserBuild: {
@@ -255,6 +328,27 @@ export interface components {
             };
             /** Detail */
             detail: string | null;
+            /** Application Location */
+            application_location?: string | null;
+        };
+        /** CaseReplayLink */
+        CaseReplayLink: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "cancelling" | "cancelled" | "completed" | "incomplete" | "blocked";
+            replay: components["schemas"]["ReplaySelection"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** EngineVerdict */
         EngineVerdict: {
@@ -268,6 +362,56 @@ export interface components {
             /** Detail */
             detail: string;
         };
+        /** FailureGroup */
+        FailureGroup: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "application_assertion" | "infrastructure_failure";
+            /** Case Id */
+            case_id: string | null;
+            /** Assertion */
+            assertion: string | null;
+            /** Expected */
+            expected: string | null;
+            /** Application Location */
+            application_location: string | null;
+            /** Reason */
+            reason: string | null;
+            /**
+             * First Seen
+             * Format: date-time
+             */
+            first_seen: string;
+            /**
+             * Last Seen
+             * Format: date-time
+             */
+            last_seen: string;
+            /** Browsers */
+            browsers: ("chromium" | "firefox" | "webkit")[];
+            /** Count */
+            count: number;
+            /** Receipts */
+            receipts: components["schemas"]["FailureReceipt"][];
+        };
+        /** FailureReceipt */
+        FailureReceipt: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Receipt Sha */
+            receipt_sha: string;
+            /** Expired */
+            expired: boolean;
+            /** Browsers */
+            browsers: ("chromium" | "firefox" | "webkit")[];
+            /** Count */
+            count: number;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -277,6 +421,26 @@ export interface components {
         Login: {
             /** Password */
             password: string;
+        };
+        /** NewCaseReplay */
+        NewCaseReplay: {
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "chromium" | "firefox" | "webkit";
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "base" | "head";
+            /**
+             * Number
+             * @enum {integer}
+             */
+            number: 1 | 2;
+            /** Case Id */
+            case_id: string;
         };
         /** NewRun */
         NewRun: {
@@ -289,12 +453,20 @@ export interface components {
             /** Head Ref */
             head_ref: string;
         };
+        /** NewVisualApproval */
+        NewVisualApproval: {
+            /** Receipt Sha */
+            receipt_sha: string;
+            /** Screenshot Sha256 */
+            screenshot_sha256: string;
+        };
         /** Plan */
         Plan: {
             /** Engines */
             engines: string[];
             /** Case Ids */
             case_ids: string[];
+            review?: components["schemas"]["ReviewPlan"] | null;
         };
         /** ProfileChoice */
         ProfileChoice: {
@@ -316,12 +488,89 @@ export interface components {
             /** Profiles */
             profiles: components["schemas"]["ProfileChoice"][];
         };
+        /** ReplaySelection */
+        ReplaySelection: {
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "chromium" | "firefox" | "webkit";
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "base" | "head";
+            /**
+             * Number
+             * @enum {integer}
+             */
+            number: 1 | 2;
+            /** Case Id */
+            case_id: string;
+            /** Receipt Sha */
+            receipt_sha: string;
+            /** Commit */
+            commit: string;
+        };
+        /** ReplaySummary */
+        ReplaySummary: {
+            /** Classification */
+            classification: ("consistent_failure" | "suspected_flaky" | "infrastructure_failure" | "insufficient_evidence" | "passed_on_replay") | null;
+            /** Sample Size */
+            sample_size: number;
+            /** Passed */
+            passed: number;
+            /** Assertion Failed */
+            assertion_failed: number;
+            /** Infrastructure Failure */
+            infrastructure_failure: number;
+        };
         /** RepositoryChoice */
         RepositoryChoice: {
             /** Id */
             id: string;
             /** Label */
             label: string;
+        };
+        /** ReviewPlan */
+        ReviewPlan: {
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "chromium" | "firefox" | "webkit";
+            /** Routes */
+            routes: components["schemas"]["ReviewRoute"][];
+        };
+        /** ReviewRoute */
+        ReviewRoute: {
+            /** Id */
+            id: string;
+            /** Path */
+            path: string;
+            /** Ready */
+            ready: string;
+            /** Visual Required */
+            visual_required: boolean;
+            /** Accessibility Required */
+            accessibility_required: boolean;
+        };
+        /** RouteReview */
+        RouteReview: {
+            /** Route Id */
+            route_id: string;
+            /** Path */
+            path: string;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "chromium" | "firefox" | "webkit";
+            browser_build: components["schemas"]["BrowserBuild"] | null;
+            /** Profile Sha256 */
+            profile_sha256: string;
+            visual: components["schemas"]["VisualReview"];
+            accessibility: components["schemas"]["AccessibilityReview"];
         };
         /** RunDetail */
         RunDetail: {
@@ -362,6 +611,11 @@ export interface components {
             expired: boolean | null;
             /** Receipt Sha */
             receipt_sha: string | null;
+            /** Superseded At */
+            superseded_at?: string | null;
+            /** Source Run Id */
+            source_run_id?: string | null;
+            replay?: components["schemas"]["ReplaySelection"] | null;
             /** Attempts */
             attempts: components["schemas"]["Attempt"][];
             /** Artifacts */
@@ -370,6 +624,13 @@ export interface components {
             engine_verdicts: {
                 [key: string]: components["schemas"]["EngineVerdict"];
             };
+            replay_summary?: components["schemas"]["ReplaySummary"] | null;
+            /** Case Replays */
+            case_replays: components["schemas"]["CaseReplayLink"][];
+            /** Reviews */
+            reviews: components["schemas"]["RouteReview"][];
+            /** Visual Approvals */
+            visual_approvals: components["schemas"]["VisualApproval"][];
         };
         /** RunEvent */
         RunEvent: {
@@ -426,6 +687,11 @@ export interface components {
             expired: boolean | null;
             /** Receipt Sha */
             receipt_sha: string | null;
+            /** Superseded At */
+            superseded_at?: string | null;
+            /** Source Run Id */
+            source_run_id?: string | null;
+            replay?: components["schemas"]["ReplaySelection"] | null;
         };
         /** Session */
         Session: {
@@ -451,6 +717,64 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** VisualApproval */
+        VisualApproval: {
+            binding: components["schemas"]["VisualBinding"];
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Receipt Sha */
+            receipt_sha: string;
+            /**
+             * Accepted By
+             * @constant
+             */
+            accepted_by: "owner";
+            /**
+             * Accepted At
+             * Format: date-time
+             */
+            accepted_at: string;
+        };
+        /** VisualBinding */
+        VisualBinding: {
+            /** Route Id */
+            route_id: string;
+            /**
+             * Engine
+             * @enum {string}
+             */
+            engine: "chromium" | "firefox" | "webkit";
+            browser_build: components["schemas"]["BrowserBuild"];
+            /** Commit */
+            commit: string;
+            /** Profile Sha256 */
+            profile_sha256: string;
+            /** Screenshot Sha256 */
+            screenshot_sha256: string;
+        };
+        /** VisualReview */
+        VisualReview: {
+            /** Required */
+            required: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "changed" | "unchanged" | "approved" | "unavailable";
+            /** Detail */
+            detail: string | null;
+            /** Changed Pixels */
+            changed_pixels: number | null;
+            /** Artifacts */
+            artifacts: {
+                [key: string]: string;
+            };
+            binding: components["schemas"]["VisualBinding"] | null;
+            applied_approval: components["schemas"]["VisualApproval"] | null;
         };
     };
     responses: never;
@@ -628,6 +952,84 @@ export interface operations {
             };
         };
     };
+    failures_api_v1_repositories__repo_id__failures_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                repo_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FailureGroup"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replay_case_api_v1_runs__run_id__case_replays_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewCaseReplay"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSummary"];
+                };
+            };
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     detail_api_v1_runs__run_id__get: {
         parameters: {
             query?: never;
@@ -646,6 +1048,53 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_visual_api_v1_runs__run_id__visual_reviews__route_id__approval_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                run_id: string;
+                route_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewVisualApproval"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisualApproval"];
+                };
+            };
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisualApproval"];
                 };
             };
             /** @description Validation Error */
@@ -694,9 +1143,11 @@ export interface operations {
     };
     timeline_api_v1_runs__run_id__events_get: {
         parameters: {
-            query?: never;
+            query?: {
+                after?: number;
+            };
             header?: {
-                "Last-Event-ID"?: number;
+                "Last-Event-ID"?: number | null;
             };
             path: {
                 run_id: string;

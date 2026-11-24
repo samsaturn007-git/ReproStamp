@@ -6,14 +6,16 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import APIKeyCookie
 from starlette.concurrency import run_in_threadpool
 
+from ..cli import BUNDLE_ERRORS
 from ..profile import PolicyError
 from ..repository import RepositoryError
 from . import schema, store
+from .review_store import ApprovalConflict, ApprovalExpired
 from .settings import Settings
 
 
@@ -105,12 +107,51 @@ def create_app(settings: Settings | None = None, *, describe: bool = False) -> F
     def list_runs():
         return store.runs(settings)
 
+    @app.get(PREFIX + "/repositories/{repo_id}/failures", response_model=list[schema.FailureGroup],
+             dependencies=[Depends(owner)])
+    def failures(repo_id: schema.RegistrationId):
+        return store.failure_history(settings, repo_id)
+
+    @app.post(PREFIX + "/runs/{run_id}/case-replays", response_model=schema.RunSummary, status_code=201,
+              responses={200: {"model": schema.RunSummary}}, dependencies=[Depends(owner_write)])
+    def replay_case(run_id: UUID, body: schema.NewCaseReplay, response: Response,
+                    key: Annotated[UUID, Header(alias="Idempotency-Key")]):
+        try:
+            row, created = store.submit_replay(settings, key, run_id, body.model_dump())
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from error
+        except store.SubmissionConflict as error:
+            raise HTTPException(409, str(error)) from error
+        except BUNDLE_ERRORS as error:
+            raise HTTPException(422, f"Could not queue case replay. {error}") from error
+        if not created:
+            response.status_code = 200
+        response.headers["Location"] = f"{PREFIX}/runs/{row['id']}"
+        return row
+
     @app.get(PREFIX + "/runs/{run_id}", response_model=schema.RunDetail, dependencies=[Depends(owner)])
     def detail(run_id: UUID):
         row = store.get_run(settings, run_id)
         if row is None:
             raise HTTPException(404, "Run not found.")
         return row
+
+    @app.post(PREFIX + "/runs/{run_id}/visual-reviews/{route_id}/approval", response_model=schema.VisualApproval,
+              status_code=201, responses={200: {"model": schema.VisualApproval}},
+              dependencies=[Depends(owner_write)])
+    def approve_visual(run_id: UUID, route_id: schema.RegistrationId, body: schema.NewVisualApproval,
+                       response: Response):
+        try:
+            approval, created = store.approve_visual(settings, run_id, route_id, body.receipt_sha, body.screenshot_sha256)
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from error
+        except ApprovalExpired as error:
+            raise HTTPException(410, str(error)) from error
+        except (ApprovalConflict, OSError) as error:
+            raise HTTPException(409, str(error)) from error
+        if not created:
+            response.status_code = 200
+        return approval
 
     @app.post(PREFIX + "/runs/{run_id}/cancel", response_model=schema.RunSummary, dependencies=[Depends(owner_write)])
     def cancel(run_id: UUID):
@@ -123,11 +164,12 @@ def create_app(settings: Settings | None = None, *, describe: bool = False) -> F
              responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
              dependencies=[Depends(owner)])
     def timeline(run_id: UUID, request: Request,
-                 last: Annotated[int, Header(alias="Last-Event-ID", ge=0, le=2**63 - 1)] = 0):
+                 last: Annotated[int | None, Header(alias="Last-Event-ID", ge=0, le=2**63 - 1)] = None,
+                 after: Annotated[int, Query(ge=0, le=2**63 - 1)] = 0):
         detail(run_id)
 
         async def stream():
-            cursor = last
+            cursor = last if last is not None else after
             cookie = request.cookies.get(COOKIE)
             yield "retry: 1200\n\n"
             idle = 0
@@ -169,7 +211,9 @@ def create_app(settings: Settings | None = None, *, describe: bool = False) -> F
         path = (root / item["path"]).resolve()
         if not path.is_relative_to(root) or not path.is_file():
             raise HTTPException(404, "Evidence file is unavailable.")
+        preview = item["kind"] == "screenshot" and item["path"].startswith("review/")
         return FileResponse(path, media_type=DOWNLOAD_FORMATS[item["kind"]], filename=Path(item["path"]).name,
+                            content_disposition_type="inline" if preview else "attachment",
                             headers={"Content-Security-Policy": "sandbox"})
 
     @app.get(PREFIX + "/runs/{run_id}/receipt", response_class=FileResponse, dependencies=[Depends(owner)],

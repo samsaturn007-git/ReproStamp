@@ -1,8 +1,11 @@
 import re
+from datetime import datetime
+from uuid import UUID
 
-from .profile import CASE_ID, ENGINES, IMAGE
+from .profile import CASE_ID, ENGINES, IMAGE, review_plan
 from .repository import OBJECT_ID
-from .runner import ARTIFACT_NAMES
+from .review import AXE_VERSION, MAX_PNG_BYTES, REVIEW_FILES, findings_from_report
+from .runner import APPLICATION_LOCATION, ARTIFACT_NAMES
 from .verdict import EXIT_CODES
 
 
@@ -96,7 +99,11 @@ def validate_attempt(attempt, plan: dict, payload: dict) -> tuple[tuple, set[str
         raise ValueError("Attempt cases must be a list.")
     seen = set()
     for case in cases:
-        record(case, "case_id status playwright_status duration_ms assertion artifacts detail", "case")
+        fields = "case_id status playwright_status duration_ms assertion artifacts detail"
+        if isinstance(case, dict) and "application_location" in case:
+            fields += " application_location"
+            string(case["application_location"], "application stack location", APPLICATION_LOCATION)
+        record(case, fields, "case")
         case_id = case["case_id"]
         enum(case_id, plan["case_ids"], "case ID")
         if case_id in seen:
@@ -128,8 +135,11 @@ def validate_attempt(attempt, plan: dict, payload: dict) -> tuple[tuple, set[str
 
 
 def validate_payload(payload: dict) -> None:
-    record(payload, "run_id replay_of base_sha head_sha plan inputs execution_state verdict reason detail "
-           "engine_verdicts attempts artifacts", "receipt payload")
+    fields = ("run_id replay_of base_sha head_sha plan inputs execution_state verdict reason detail "
+              "engine_verdicts attempts artifacts")
+    if isinstance(payload, dict) and "reviews" in payload:
+        fields += " reviews"
+    record(payload, fields, "receipt payload")
     string(payload["run_id"], "run ID", re.compile(r"[0-9a-f]{32}"))
     if payload["replay_of"] is not None:
         string(payload["replay_of"], "original receipt hash", SHA256)
@@ -145,7 +155,8 @@ def validate_payload(payload: dict) -> None:
     string(payload["reason"], "verdict reason", REASON)
     string(payload["detail"], "verdict detail")
     plan = payload["plan"]
-    record(plan, "engines case_ids", "run plan")
+    has_review = isinstance(plan, dict) and "review" in plan
+    record(plan, "engines case_ids review" if has_review else "engines case_ids", "run plan")
     for field in ("engines", "case_ids"):
         if not isinstance(plan[field], list):
             raise ValueError(f"Invalid plan {field}.")
@@ -188,9 +199,116 @@ def validate_payload(payload: dict) -> None:
     ):
         raise ValueError("Completed run is missing required attempt evidence.")
     artifacts = payload["artifacts"]
-    if not isinstance(artifacts, dict) or artifacts.keys() != expected_paths:
-        raise ValueError("Artifact manifest must match the approved evidence paths.")
+    if not isinstance(artifacts, dict):
+        raise ValueError("Invalid artifact manifest.")
     for path, metadata in artifacts.items():
         record(metadata, "size sha256", f"metadata for {path}")
         integer(metadata["size"], 0, 2**53 - 1, "artifact size")
         string(metadata["sha256"], "artifact hash", SHA256)
+    if has_review:
+        try:
+            planned_review = review_plan(plan["review"], plan["engines"])
+        except TypeError as error:
+            raise ValueError("Invalid route review plan.") from error
+        if "reviews" in payload:
+            expected_paths |= validate_reviews(payload, planned_review)
+        elif payload["execution_state"] == "completed":
+            raise ValueError("A completed run must report every configured review.")
+    elif "reviews" in payload:
+        raise ValueError("Route review results require a configured review plan.")
+    if artifacts.keys() != expected_paths:
+        raise ValueError("Artifact manifest must match the approved evidence paths.")
+
+
+def validate_reviews(payload: dict, plan) -> set[str]:
+    reviews = payload["reviews"]
+    inputs = payload["inputs"]
+    if inputs is None or not isinstance(reviews, list) or len(reviews) != len(plan.routes):
+        raise ValueError("Invalid review results for the configured routes.")
+    builds = [attempt["browser_build"] for attempt in payload["attempts"]
+              if attempt["engine"] == plan.engine and attempt["status"] == "completed"]
+    paths = set()
+    for route, review in zip(plan.routes, reviews, strict=True):
+        record(review, "route_id path engine browser_build profile_sha256 visual accessibility", "route review")
+        if (review["route_id"], review["path"], review["engine"]) != (route.id, route.path, plan.engine):
+            raise ValueError("The review does not match its planned route and browser.")
+        if review["profile_sha256"] != inputs["profile_sha256"]:
+            raise ValueError("The review does not match the effective profile.")
+        build = review["browser_build"]
+        if build is not None and (len(builds) != 4 or any(build != item for item in builds)
+                                  or build["platform"] != inputs["runner_platform"]):
+            raise ValueError("The review does not match the observed browser build.")
+        visual, accessibility = review["visual"], review["accessibility"]
+        record(visual, "required status detail changed_pixels artifacts binding applied_approval", "visual review")
+        record(accessibility, "required status detail axe_version findings", "accessibility review")
+        for check, required, statuses in (
+            (visual, route.visual_required, ("changed", "unchanged", "approved", "unavailable")),
+            (accessibility, route.accessibility_required, ("regression", "passed", "unavailable")),
+        ):
+            if check["required"] is not required:
+                raise ValueError("The review requirement does not match the profile.")
+            enum(check["status"], statuses, "review check status")
+            if check["status"] == "unavailable":
+                string(check["detail"], "unavailable review detail")
+            elif check["detail"] is not None or build is None:
+                raise ValueError("An available review requires a browser build and has no execution error.")
+            if check["required"] and payload["verdict"] == "VERIFIED" and check["status"] in (
+                "changed", "regression", "unavailable",
+            ):
+                raise ValueError("An unresolved required review cannot be verified.")
+        paths |= validate_visual(payload, plan.engine, route.id, build, visual)
+        try:
+            findings = findings_from_report(accessibility["findings"])
+        except TypeError as error:
+            raise ValueError("Invalid axe findings.") from error
+        if len(findings) != len(accessibility["findings"]):
+            raise ValueError("Duplicate axe findings.")
+        if accessibility["status"] == "unavailable":
+            if accessibility["axe_version"] is not None or findings:
+                raise ValueError("An unavailable scan cannot report findings or an axe version.")
+        else:
+            string(accessibility["axe_version"], "axe version", AXE_VERSION)
+            if bool(findings) != (accessibility["status"] == "regression"):
+                raise ValueError("A regression requires newly detected findings.")
+    return paths
+
+
+def validate_visual(payload: dict, engine: str, route_id: str, build: dict, visual: dict) -> set[str]:
+    status = visual["status"]
+    changed = status in ("changed", "approved")
+    binding = visual["binding"]
+    approval = visual["applied_approval"]
+    if (not changed and binding is not None) or (status != "approved" and approval is not None):
+        raise ValueError("Visual binding and approval require changed pixels and the corresponding status.")
+    if status == "unavailable":
+        if visual["changed_pixels"] is not None or visual["artifacts"] != {}:
+            raise ValueError("An unavailable visual comparison cannot report screenshot evidence.")
+        return set()
+    allowed = {role: f"review/{engine}/{route_id}/{name}" for role, name in REVIEW_FILES.items()}
+    paths = validate_artifact_paths(visual["artifacts"], allowed, "review screenshot")
+    if paths != set(allowed.values()):
+        raise ValueError("An available visual comparison requires all three screenshot artifacts.")
+    for path in paths:
+        metadata = payload["artifacts"].get(path)
+        if metadata is None or not 0 < metadata["size"] <= MAX_PNG_BYTES:
+            raise ValueError("Review screenshot is missing or outside size limits.")
+    inputs = payload["inputs"]
+    settings = inputs["settings"]
+    max_changed = settings["viewport_width"] * settings["viewport_height"] if changed else 0
+    integer(visual["changed_pixels"], int(changed), max_changed, "changed pixels")
+    if changed:
+        expected = {"route_id": route_id, "engine": engine, "browser_build": build, "commit": payload["head_sha"],
+                    "profile_sha256": inputs["profile_sha256"],
+                    "screenshot_sha256": payload["artifacts"][allowed["head"]]["sha256"]}
+        if binding != expected:
+            raise ValueError("The visual approval binding does not match the screenshot and comparison inputs.")
+    if status == "approved":
+        record(approval, "binding run_id receipt_sha accepted_by accepted_at", "visual approval")
+        string(approval["run_id"], "approval source run ID")
+        string(approval["receipt_sha"], "approval source receipt SHA-256", SHA256)
+        string(approval["accepted_at"], "approval timestamp")
+        if (str(UUID(approval["run_id"])) != approval["run_id"]
+            or approval["binding"] != binding or approval["accepted_by"] != "owner"
+            or datetime.fromisoformat(approval["accepted_at"]).utcoffset() is None):
+            raise ValueError("The recorded visual approval does not match the screenshot binding.")
+    return paths

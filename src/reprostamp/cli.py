@@ -12,7 +12,9 @@ from pathlib import Path
 
 from .profile import PolicyError, load_profile
 from .receipt import browser_builds, export_receipt, matrix, verify_bundle
+from .repair import add_suggestion_command
 from .repository import Repository, RepositoryError, changed_paths
+from .review import collect_reviews, review_verdict
 from .run_inputs import fingerprint_inputs, run_plan
 from .runner import Attempt, DockerError, freeze_harness, run_attempt, runner_platform
 from .verdict import EXIT_CODES, Verdict, classify
@@ -47,6 +49,7 @@ def compare(
     workspace_parent: Path | None = None,
     on_attempt_start: Callable[[str, str, int], None] | None = None,
     on_attempt: Callable[[Attempt], None] | None = None,
+    approvals: list[dict] | None = None,
 ) -> int:
     profile = input_error = None
     try:
@@ -119,7 +122,14 @@ def compare(
                         if on_attempt:
                             on_attempt(attempt)
                         print_attempt(attempt)
+            if profile.review:
+                if original:
+                    approvals = [review["visual"]["applied_approval"] for review in original["payload"].get("reviews", [])
+                                 if review["visual"]["applied_approval"] is not None]
+                result["reviews"] = collect_reviews(profile, attempts, result["inputs"], head, workspace, out,
+                                                    approvals or [])
         verdict, engine_verdicts = classify(profile, attempts, platform)
+        verdict = review_verdict(verdict, result.get("reviews", []))
         execution_state = "completed" if all(attempt.status == "completed" for attempt in attempts) else "incomplete"
     except PolicyError as error:
         execution_state = "blocked"
@@ -282,6 +292,9 @@ def main(argv: list[str] | None = None) -> int:
     diff_command.add_argument("left", help="first receipt ZIP path")
     diff_command.add_argument("right", help="second receipt ZIP path")
     diff_command.set_defaults(handler=diff_receipts)
+    add_suggestion_command(commands)
+    from .starter import add_starter_command
+    add_starter_command(commands)
     args = parser.parse_args(argv)
     try:
         return args.handler(args)

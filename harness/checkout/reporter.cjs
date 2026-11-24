@@ -13,6 +13,10 @@ module.exports = class ReproStampReporter {
   onTestEnd(test, result) {
     const annotation = result.annotations.find(({ type }) => type === 'reprostamp.assertion');
     const assertion = annotation ? JSON.parse(annotation.description) : null;
+    const applicationFrame = result.errors.map(({ stack }) => stack?.match(
+      /https?:\/\/127\.0\.0\.1:4173\/(src\/[\w.@/-]+)(?:\?[^\s:)]*)?(:\d+(?::\d+)?)/,
+    )).find(Boolean);
+    const location = result.annotations.find(({ type }) => type === 'reprostamp.application-location');
     const build = result.annotations.find(({ type }) => type === 'reprostamp.browser');
     if (build) this.builds.add(build.description);
     const artifacts = {};
@@ -27,6 +31,7 @@ module.exports = class ReproStampReporter {
       status: result.status,
       duration_ms: result.duration,
       assertion,
+      application_location: location?.description ?? (applicationFrame ? applicationFrame[1] + applicationFrame[2] : null),
       artifacts,
       error: result.error?.message ?? null,
     });

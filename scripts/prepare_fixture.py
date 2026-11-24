@@ -91,11 +91,7 @@ def warm_cache(image: str, cache: Path, *packages: Path) -> None:
             )
 
 
-def prepare_shipping_harness(destination: Path, image: str, cache: Path, app_scaffold: Path) -> None:
-    checkout = ROOT / "harness/checkout"
-    shipping = ROOT / "harness/shipping"
-    names = ("package.json", "package-lock.json", "playwright.config.cjs", "reporter.cjs", "test.cjs", "wait-for-app.cjs")
-    inputs = [checkout / name for name in names] + [shipping / "shipping.spec.cjs"]
+def prepare_harness(destination: Path, inputs: list[Path], image: str, cache: Path, app_scaffold: Path) -> None:
     files = {source.name: source.read_bytes() for source in inputs}
     digest = hashlib.sha256()
     for name, data in sorted(files.items()):
@@ -113,11 +109,11 @@ def prepare_shipping_harness(destination: Path, image: str, cache: Path, app_sca
             if not snapshot.is_dir():
                 raise
             if {path.name for path in snapshot.iterdir()} != files.keys():
-                raise ValueError(f"The generated shipping harness contains unexpected files at {snapshot}.")
+                raise ValueError(f"The generated harness contains unexpected files at {snapshot}.")
             for name, data in files.items():
                 existing = snapshot / name
                 if not existing.is_file() or existing.read_bytes() != data:
-                    raise ValueError(f"The generated shipping harness differs at {existing}.")
+                    raise ValueError(f"The generated harness differs at {existing}.")
         warm_cache(image, cache, app_scaffold, snapshot)
         # The profile resolves this link before copying the harness for a comparison.
         link = Path(temp) / "active"
@@ -133,9 +129,17 @@ def prepare(fixture: str) -> None:
     harness = Path(os.path.abspath(profile_path.parent / profile["harness"]))
     app_scaffold = ROOT / "fixtures/checkout/app"
     image = profile["runner_image"]
-    base, head = fixture_commits(repo, fixture)
+    base, head = fixture_commits(repo, "checkout" if fixture == "checkout-review" else fixture)
+    checkout = ROOT / "harness/checkout"
+    tools = [checkout / name for name in ("playwright.config.cjs", "reporter.cjs", "test.cjs", "wait-for-app.cjs")]
+    manifests = ("package.json", "package-lock.json")
     if fixture == "shipping":
-        prepare_shipping_harness(harness, image, cache, app_scaffold)
+        inputs = tools + [checkout / name for name in manifests] + [ROOT / "harness/shipping/shipping.spec.cjs"]
+        prepare_harness(harness, inputs, image, cache, app_scaffold)
+    elif fixture == "checkout-review":
+        review = ROOT / "harness/prd07"
+        inputs = tools + [checkout / "checkout.spec.cjs", review / "review.cjs"] + [review / name for name in manifests]
+        prepare_harness(harness, inputs, image, cache, app_scaffold)
     else:
         warm_cache(image, cache, app_scaffold, harness)
     print(json.dumps({"repo": str(repo), "base": base, "head": head}))
@@ -143,5 +147,5 @@ def prepare(fixture: str) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Provision an owned ReproStamp fixture and its npm cache.")
-    parser.add_argument("fixture", choices=COMMIT_MESSAGES)
+    parser.add_argument("fixture", choices=(*COMMIT_MESSAGES, "checkout-review"))
     prepare(parser.parse_args().fixture)

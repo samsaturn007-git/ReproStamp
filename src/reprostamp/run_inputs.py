@@ -9,10 +9,13 @@ from .runner import RUNNER_CONTRACT
 
 
 def run_plan(profile: Profile) -> dict:
-    return {
+    plan = {
         "engines": list(profile.engines),
         "case_ids": [profile.expected_failure.case_id, *profile.required_regressions],
     }
+    if profile.review:
+        plan["review"] = {"engine": profile.review.engine, "routes": [asdict(item) for item in profile.review.routes]}
+    return plan
 
 
 def fingerprint_inputs(
@@ -34,6 +37,9 @@ def fingerprint_inputs(
         **oracle, **run_plan(profile), "runner_image": profile.runner_image,
         "editable_paths": profile.editable_paths, "settings": settings,
     }
+    oracle_sha256 = hash_json({**oracle, "harness": harness_files})
+    if profile.review:
+        effective_profile["oracle_sha256"] = oracle_sha256
     return {
         "repository_sha256": hash_json(sorted(repo.git("rev-list", "--max-parents=0", base_sha).decode().split())),
         "diff_sha256": hash_json([
@@ -45,7 +51,7 @@ def fingerprint_inputs(
             side: hashlib.sha256(repo.git("cat-file", "blob", tree["package-lock.json"].blob)).hexdigest()
             for side, tree in (("base", base), ("head", head))
         },
-        "oracle_sha256": hash_json({**oracle, "harness": harness_files}),
+        "oracle_sha256": oracle_sha256,
         "profile_sha256": hash_json(effective_profile),
         "runner_image": profile.runner_image,
         "runner_platform": platform,

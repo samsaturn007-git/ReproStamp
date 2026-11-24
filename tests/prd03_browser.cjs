@@ -18,9 +18,17 @@ async function main() {
   const page = await context.newPage();
   try {
     const cursors = [];
+    const fallbackCursors = [];
     page.on("request", async (request) => {
-      if (request.url().endsWith("/events")) {
+      const url = new URL(request.url());
+      if (url.pathname.endsWith("/events")) {
         cursors.push((await request.allHeaders())["last-event-id"] ?? "");
+        if (url.searchParams.has("after")) fallbackCursors.push(Number(url.searchParams.get("after")));
+      }
+    });
+    page.on("response", (response) => {
+      if (new URL(response.url()).pathname.endsWith("/events") && response.status() >= 500) {
+        mark("browser-reconnect-http-error");
       }
     });
     await page.goto(origin);
@@ -44,10 +52,11 @@ async function main() {
     await page.getByRole("link", { name: "Download receipt", exact: true }).waitFor({ timeout: 150_000 });
     await page.getByText("Complete", { exact: true }).waitFor();
     assert.ok(cursors.some((cursor) => Number(cursor) >= 3), cursors);
+    assert.ok(fallbackCursors.some((cursor) => cursor >= 3), fallbackCursors);
     const sequences = await page.locator("[data-sequence]").evaluateAll((items) =>
       items.map((item) => Number(item.dataset.sequence)));
     assert.deepEqual(sequences, sequences.map((_, index) => index + 1));
-    mark("browser-timeline.json", JSON.stringify({ sequences, cursors }));
+    mark("browser-timeline.json", JSON.stringify({ sequences, cursors, fallbackCursors }));
 
     const matrix = page.getByRole("table", { name: "Browser verification matrix" });
     assert.equal(await matrix.getByText("Assertion failed", { exact: true }).count(), 6);

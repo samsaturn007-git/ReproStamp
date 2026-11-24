@@ -132,7 +132,7 @@ def exercise(stack, output, settings, registry, repo, harness, api_port):
     migrate(settings)
     migrate(settings)
     with connect(settings) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone()["version_num"] == "0001_durable_runs"
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone()["version_num"] == "0004_route_reviews"
     print("PASS empty PostgreSQL database migrated, with repeat migration a no-op", flush=True)
 
     environment = {
@@ -188,6 +188,7 @@ def exercise(stack, output, settings, registry, repo, harness, api_port):
     stop(worker, kill=True)
     stop(api_process, kill=True)
     until((output / "browser-disconnected").exists)
+    until((output / "browser-reconnect-http-error").exists)
 
     tag = git("-C", str(repo), "rev-parse", "checkout-fixed")
     base = git("-C", str(repo), "rev-parse", "checkout-base")

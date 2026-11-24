@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import re
 import shutil
 import stat
 import subprocess
@@ -24,10 +25,16 @@ COPY_AND_INSTALL = (
     "npm ci --offline --ignore-scripts --include=dev --no-audit --no-fund --cache /tmp/npm-cache; "
 )
 APP_COMMAND = COPY_AND_INSTALL + "exec node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 4173 --strictPort"
-HARNESS_COMMAND = COPY_AND_INSTALL + (
-    "node wait-for-app.cjs; exec node node_modules/@playwright/test/cli.js test --config playwright.config.cjs"
+FUNCTIONAL_COMMAND = "node node_modules/@playwright/test/cli.js test --config playwright.config.cjs"
+HARNESS_SETUP = COPY_AND_INSTALL + "node wait-for-app.cjs; "
+HARNESS_COMMAND = HARNESS_SETUP + "exec " + FUNCTIONAL_COMMAND
+REVIEW_COMMAND = HARNESS_SETUP + (
+    f"status=0; {FUNCTIONAL_COMMAND} || status=$?; "
+    "printf '%s' \"$status\" > /evidence/functional-exit; "
+    "node review.cjs; exit \"$status\""
 )
 ARTIFACT_NAMES = {"trace": "trace.zip", "screenshot": "screenshot.png"}
+APPLICATION_LOCATION = re.compile(r"src/(?:[\w.@-]+/)*[\w.@-]+:[1-9][0-9]*(?::[1-9][0-9]*)?", re.ASCII)
 HOME_OVERRIDES = ["--env=HOME=/tmp", "--env=CI=1"]
 PROXY_OVERRIDES = [f"--env={variable}=" for variable in PROXY_VARIABLES]
 
@@ -52,6 +59,7 @@ class Case:
     assertion: Assertion | None
     artifacts: dict[str, str]
     detail: str | None
+    application_location: str | None = None
 
 
 @dataclass(frozen=True)
@@ -131,8 +139,50 @@ def container_args(name: str, network: str, run_id: str, source: Path, cache: Pa
     ]
 
 
+class IsolatedPair:
+    def __init__(self, timeout_seconds: int):
+        self.deadline = time.monotonic() + timeout_seconds
+        prefix = f"reprostamp-{uuid.uuid4().hex}"
+        self.app = f"{prefix}-app"
+        self.harness = f"{prefix}-harness"
+        self.containers: dict[str, str] = {}
+
+    def command(self, *args: str) -> str:
+        return docker(*args, timeout=self.deadline - time.monotonic()).strip()
+
+    def create(self, role: str, name: str, *args: str) -> None:
+        try:
+            self.command("create", *args)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            self.containers[role] = name  # The daemon may have accepted the create request.
+            raise
+        self.containers[role] = name
+
+    def collect(self, output: Path, root: Path) -> tuple[dict[str, str], list[str]]:
+        logs, cleanup_errors = {}, []
+        for role, name in reversed(self.containers.items()):
+            try:
+                docker("stop", "--time=0", name, timeout=5)
+            except (DockerError, subprocess.TimeoutExpired):
+                pass  # Force-removal below also stops a workload that is still running.
+            try:
+                log = docker("logs", name, timeout=5, merge_stderr=True)
+                log_path = output / f"{role}.log"
+                log_path.write_text(log, encoding="utf-8")
+                logs[role] = log_path.relative_to(root).as_posix()
+            except (DockerError, OSError, subprocess.TimeoutExpired):
+                pass
+            try:
+                docker("rm", "--force", name, timeout=5)
+            except (DockerError, subprocess.TimeoutExpired) as error:
+                if "No such container" not in str(error):
+                    cleanup_errors.append(f"{name}: {error}")
+        return logs, cleanup_errors
+
+
 def read_report(
-    source: Path, output: Path, root: Path, profile: Profile, engine: str,
+    source: Path, output: Path, root: Path, case_ids: frozenset[str], engine: str,
+    *, require_trace: bool = False, require_failure_artifacts: bool = True,
 ) -> tuple[list[Case], BrowserBuild | None, str | None, str | None]:
     cases = []
     build = None
@@ -149,7 +199,7 @@ def read_report(
         seen = set()
         for entry in report["cases"]:
             case_id = entry["case_id"]
-            if case_id not in profile.case_ids or case_id in seen:
+            if case_id not in case_ids or case_id in seen:
                 raise ValueError(f"Unexpected or duplicate case {case_id!r}.")
             seen.add(case_id)
             raw_status = entry["status"]
@@ -185,11 +235,14 @@ def read_report(
                 destination.parent.mkdir(exist_ok=True)
                 shutil.copyfile(artifact, destination)
                 artifacts[kind] = destination.relative_to(root).as_posix()
-            cases.append(Case(case_id, status, raw_status, duration, assertion, artifacts, detail))
+            location = entry.get("application_location")
+            if not isinstance(location, str) or not APPLICATION_LOCATION.fullmatch(location):
+                location = None
+            cases.append(Case(case_id, status, raw_status, duration, assertion, artifacts, detail, location))
 
         if any(case.status == "unsupported" for case in cases):
             return cases, build, "required_engine_unsupported", f"The {engine} executable is unavailable in the runner."
-        missing = (profile.case_ids - seen) | {case.case_id for case in cases if case.status == "missing"}
+        missing = (case_ids - seen) | {case.case_id for case in cases if case.status == "missing"}
         if missing:
             return cases, build, "required_cell_missing", f"Missing cases: {', '.join(sorted(missing))}."
         if report["status"] not in ("passed", "failed") or report["errors"]:
@@ -197,8 +250,10 @@ def read_report(
         for case in cases:
             if case.status == "error":
                 raise ValueError(f"{case.case_id} ended as {case.playwright_status} without a completed assertion.")
-            if case.status == "assertion_failed" and case.artifacts.keys() != ARTIFACT_NAMES.keys():
+            if require_failure_artifacts and case.status == "assertion_failed" and case.artifacts.keys() != ARTIFACT_NAMES.keys():
                 raise ValueError(f"{case.case_id} is missing a failure trace or screenshot.")
+            if require_trace and "trace" not in case.artifacts:
+                raise ValueError(f"{case.case_id} is missing its replay trace.")
         if build is None:
             return cases, None, "browser_build_missing", f"The harness did not record the launched {engine} build."
     except (KeyError, OSError, TypeError, ValueError) as error:
@@ -212,77 +267,72 @@ def runner_platform(image: str) -> str:
 
 def run_attempt(
     profile: Profile, *, run_id: str, side: str, number: int, commit: str, engine: str,
-    app: Path, harness: Path, work_root: Path, out_root: Path,
+    app: Path, harness: Path, work_root: Path, out_root: Path, case_id: str | None = None,
 ) -> Attempt:
     started = time.monotonic()
-    deadline = started + profile.timeout_seconds
+    pair = IsolatedPair(profile.timeout_seconds)
     output = out_root / engine / side / f"attempt-{number}"
     output.mkdir(parents=True)
     evidence = work_root / f"{engine}-{side}-{number}"
     evidence.mkdir()
     evidence.chmod(0o777)  # Writable by pwuser inside a bind whose host parent is private.
-    prefix = f"reprostamp-{uuid.uuid4().hex}"
-    app_name, harness_name = f"{prefix}-app", f"{prefix}-harness"
+    app_name, harness_name = pair.app, pair.harness
     cache = profile.npm_cache / "_cacache"
-    containers = {}
-    logs = {}
-    cleanup_errors = []
     reason = detail = None
     exit_status = None
     phase = "startup"
 
-    def command(*args: str) -> str:
-        return docker(*args, timeout=deadline - time.monotonic()).strip()
-
-    def create(role: str, name: str, *args: str) -> None:
-        try:
-            command("create", *args)
-        except (subprocess.TimeoutExpired, KeyboardInterrupt):
-            containers[role] = name  # The daemon may have accepted the create request.
-            raise
-        containers[role] = name
-
     try:
-        create("app", app_name, *container_args(app_name, "none", run_id, app, cache),
-               profile.runner_image, "sh", "-ec", APP_COMMAND)
-        command("start", app_name)
-        create("harness", harness_name, *container_args(harness_name, f"container:{app_name}", run_id, harness, cache),
-               f"--env=REPROSTAMP_ENGINE={engine}",
-               f"--env=REPROSTAMP_BROWSER_SETTINGS={json.dumps(asdict(profile.browser), ensure_ascii=False)}",
-               "--mount", bind_mount(evidence, "/evidence", read_only=False),
-               profile.runner_image, "sh", "-ec", HARNESS_COMMAND)
-        command("start", harness_name)
+        pair.create("app", app_name, *container_args(app_name, "none", run_id, app, cache),
+                    profile.runner_image, "sh", "-ec", APP_COMMAND)
+        pair.command("start", app_name)
+        harness_command = HARNESS_COMMAND
+        review_env = []
+        test_args = []
+        if case_id is not None:
+            harness_command += ' "$@"'
+            test_args = ["reprostamp", "--grep", rf"(?:^|\s){re.escape(case_id)}$", "--trace", "on"]
+        elif profile.review and profile.review.engine == engine:
+            harness_command = REVIEW_COMMAND
+            review_env.append(f"--env=REPROSTAMP_REVIEW={json.dumps(asdict(profile.review), ensure_ascii=False)}")
+        pair.create("harness", harness_name, *container_args(harness_name, f"container:{app_name}", run_id, harness, cache),
+                    f"--env=REPROSTAMP_ENGINE={engine}",
+                    f"--env=REPROSTAMP_BROWSER_SETTINGS={json.dumps(asdict(profile.browser), ensure_ascii=False)}",
+                    *review_env,
+                    "--mount", bind_mount(evidence, "/evidence", read_only=False),
+                    profile.runner_image, "sh", "-ec", harness_command, *test_args)
+        pair.command("start", harness_name)
         phase = "execution"
-        exit_status = command("wait", harness_name)
+        exit_status = pair.command("wait", harness_name)
     except subprocess.TimeoutExpired:
         reason, detail = "attempt_timeout", f"The attempt exceeded its {profile.timeout_seconds}s deadline."
     except DockerError as error:
         reason, detail = f"runner_{phase}_failed", str(error)
     finally:
-        for role, name in reversed(containers.items()):
-            try:
-                docker("stop", "--time=0", name, timeout=5)
-            except (DockerError, subprocess.TimeoutExpired):
-                pass  # Force-removal below also stops a workload that is still running.
-            try:
-                log = docker("logs", name, timeout=5, merge_stderr=True)
-                log_path = output / f"{role}.log"
-                log_path.write_text(log, encoding="utf-8")
-                logs[role] = log_path.relative_to(out_root).as_posix()
-            except (DockerError, OSError, subprocess.TimeoutExpired):
-                pass
-            try:
-                docker("rm", "--force", name, timeout=5)
-            except (DockerError, subprocess.TimeoutExpired) as error:
-                if "No such container" not in str(error):
-                    cleanup_errors.append(f"{name}: {error}")
+        logs, cleanup_errors = pair.collect(output, out_root)
+
+    if case_id is None and profile.review and profile.review.engine == engine and phase == "execution":
+        # The optional review runs after Playwright has closed and published its report.
+        marker = evidence / "functional-exit"
+        functional_exit = b""
+        try:
+            if stat.S_ISREG(marker.lstat().st_mode):
+                with marker.open("rb") as file:
+                    functional_exit = file.read(2)
+        except OSError:
+            pass
+        if functional_exit in (b"0", b"1"):
+            exit_status, reason, detail = functional_exit.decode(), None, None
 
     if reason is None and not (evidence / "report.json").is_file():
         reason = "runner_startup_failed" if exit_status == "1" else "harness_incomplete"
         detail = f"The harness exited with status {exit_status} without producing a report. See attempt logs."
     cases, build, report_reason, report_detail = [], None, None, None
     if (evidence / "report.json").is_file():
-        cases, build, report_reason, report_detail = read_report(evidence, output, out_root, profile, engine)
+        case_ids = frozenset((case_id,)) if case_id is not None else profile.case_ids
+        cases, build, report_reason, report_detail = read_report(
+            evidence, output, out_root, case_ids, engine, require_trace=case_id is not None,
+        )
     if reason is None:
         reason, detail = report_reason, report_detail
         if reason is None and exit_status not in ("0", "1"):

@@ -67,7 +67,8 @@ def render_markdown(payload: dict) -> str:
         ]
     builds = browser_builds(payload)
     if builds:
-        lines += ["", "| Engine | Observed builds | Verdict |", "| --- | --- | --- |"]
+        verdict_label = "Functional verdict" if payload["plan"].get("review") else "Verdict"
+        lines += ["", f"| Engine | Observed builds | {verdict_label} |", "| --- | --- | --- |"]
         for engine, observed in builds.items():
             versions = ", ".join(f"{plain(version)} ({plain(platform)})" for version, platform in observed)
             verdict = payload["engine_verdicts"].get(engine)
@@ -92,17 +93,52 @@ def render_markdown(payload: dict) -> str:
                         links = " ".join(f"[{kind}]({path})" for kind, path in case["artifacts"].items())
                         columns.append(f"{status} {links}".rstrip())
                 lines.append("| " + " | ".join(columns) + " |")
+    if reviews := payload.get("reviews"):
+        lines += ["", "## Visual and accessibility review"]
+        for review in reviews:
+            visual, accessibility = review["visual"], review["accessibility"]
+            lines += ["", f"### {plain(review['path'])} · {review['engine']}", ""]
+            for name, check in (("Visual", visual), ("Accessibility", accessibility)):
+                mode = "required" if check["required"] else "advisory"
+                detail = f" · {plain(check['detail'])}" if check["detail"] else ""
+                lines.append(f"- {name} ({mode}) · **{check['status']}**{detail}")
+            if visual["artifacts"]:
+                links = " · ".join(f"[{label}]({visual['artifacts'][side]})"
+                                   for side, label in (("base", "Baseline"), ("head", "Candidate"), ("diff", "Pixel diff")))
+                lines.append(f"- {visual['changed_pixels']:,} changed pixels · {links}")
+            if approval := visual["applied_approval"]:
+                lines.append(f"- Approved by {plain(approval['accepted_by'])} on {plain(approval['accepted_at'])} "
+                             f"· source receipt `{approval['receipt_sha']}`")
+            if accessibility["axe_version"] is not None:
+                lines.append(f"- axe-core {accessibility['axe_version']} · {len(accessibility['findings'])} newly detected findings")
+            for finding in accessibility["findings"]:
+                lines.append(f"  - {plain(finding['rule'])} · {plain(finding['impact'] or 'unrated')} · {plain(finding['target'])}")
     return "\n".join([*lines, "", "See [receipt.json](receipt.json) for the integrity manifest and attempt logs.", ""])
 
 
 def export_receipt(out: Path, result: dict) -> dict:
     payload = {key: result[key] for key in PAYLOAD_FIELDS}
+    if "reviews" in result:
+        payload["reviews"] = result["reviews"]
+    payload["attempts"] = [
+        {**attempt, "cases": [
+            {key: value for key, value in case.items() if key != "application_location" or value is not None}
+            for case in attempt["cases"]
+        ]}
+        for attempt in payload["attempts"]
+    ]
     (out / "receipt.md").write_text(render_markdown(payload), encoding="utf-8")
     artifacts = {"receipt.md"}
     for attempt in payload["attempts"]:
         artifacts.update(attempt["logs"].values())
         for case in attempt["cases"]:
             artifacts.update(case["artifacts"].values())
+    for review in payload.get("reviews", []):
+        artifacts.update(review["visual"]["artifacts"].values())
+    return export_bundle(out, payload, artifacts, validate_payload)
+
+
+def export_bundle(out: Path, payload: dict, artifacts: set[str], validate) -> dict:
     payload["artifacts"] = {}
     staging = out / ".receipt.zip.tmp"
     try:
@@ -115,7 +151,7 @@ def export_receipt(out: Path, result: dict) -> dict:
                         digest.update(chunk)
                         size += member.write(chunk)
                 payload["artifacts"][path] = {"sha256": digest.hexdigest(), "size": size}
-            validate_payload(payload)
+            validate(payload)
             receipt = {"schema_version": VERSION, "payload_sha256": hash_json(payload), "payload": payload}
             data = (json.dumps(receipt, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
             if len(data) > METADATA_LIMIT:
@@ -137,7 +173,7 @@ def distinct_object(pairs: list[tuple[str, object]]) -> dict:
     return result
 
 
-def verify_bundle(path: Path) -> dict:
+def verify_bundle(path: Path, *, validate=validate_payload) -> dict:
     with zipfile.ZipFile(path) as bundle:
         members = {}
         for member in bundle.infolist():
@@ -160,7 +196,7 @@ def verify_bundle(path: Path) -> dict:
         payload = receipt["payload"]
         if hash_json(payload) != receipt["payload_sha256"]:
             raise ValueError("Receipt payload SHA-256 mismatch.")
-        validate_payload(payload)
+        validate(payload)
         expected = payload["artifacts"]
         if missing := expected.keys() - members.keys():
             raise ValueError(f"Missing artifact {min(missing)!r}.")

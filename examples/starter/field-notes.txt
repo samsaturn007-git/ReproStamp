@@ -1,0 +1,1 @@
+Create a small task tracker named Field Notes. Add Description, Due date, and Priority fields. Use the status labels To do, In progress, and Done in that order.

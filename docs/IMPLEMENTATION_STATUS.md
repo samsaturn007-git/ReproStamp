@@ -121,3 +121,187 @@ The first browser acceptance run exposed compression buffering on live events th
 No PRD-03 exit checks remain open. The worker-recovery recording, screenshot, receipt, and trace are in `.reprostamp/prd03-gates-2sxvpxdl/`. The exit suite found no comparison containers left after recovery, cancellation, or exhausted retry.
 
 A fresh readiness audit on 23 November 2026 reran `.venv/bin/python tests/prd03_exit_gate.py` and `npm --prefix dashboard run build`. Both passed. The browser recovered 38 ordered events, the replacement worker produced one receipt, and the 37-file bundle passed `verify` with Node.js and Docker excluded from `PATH`. Evidence is in `.reprostamp/prd03-gates-e4l7w6ve/`.
+
+## PRD-04
+
+Started on 23 November 2026 on `codex/prd04-github-pilot` from the locally verified PRD-02 and PRD-03 checkpoint `de86859`. The dedicated private checkout fixture at [reprostamp-checkout-pilot](https://github.com/samsaturn007-git/reprostamp-checkout-pilot) starts from `d3e8d0413daf4064085e7713206c3fa937d95b15`. The repository contains the fixture application and lockfile. The profile, harness, credential files, and evidence stay outside it. [Run the pilot](../README.md#run-the-github-pilot)
+
+| Command or check | Observed result |
+| --- | --- |
+| `.venv/bin/python -m reprostamp.control migrate` | Upgraded the existing PostgreSQL database from `0001_durable_runs` to `0002_github_pilot`. The local pilot suite applied both migrations to a fresh database. |
+| `.venv/bin/python tests/prd04_pilot.py` | Passed with a local GitHub HTTP test server and three real runs in the pinned Linux ARM64 browser image. The signed intake rejected an invalid signature, ignored fork and unapproved repository deliveries, and deduplicated a repeated delivery ID. |
+| Check publication and reconciliation in `tests/prd04_pilot.py` | The first fixture commit received `failure`, the subsequent fix received `success`, and a third commit that moved while its run was active received a superseded `neutral` check. An out-of-order delivery queued no run. The server dropped its first creation response after persisting the check. Reconciliation found the original by external ID and preserved exactly one check for that head. |
+| Timing from `.reprostamp/prd04-pilot-dt5yb8gu/integration.log` | Three runs, 36 browser attempts, and 72 case executions. Observed queue times were 223, 38, and 322 ms. Summed browser attempt durations were 33.156, 28.678, and 28.793 seconds. Response-loss reconciliation took approximately 5.1 seconds with one publication failure. |
+| `npm --prefix dashboard run build` | Passed with the regenerated API client and the superseded evidence indicator. |
+| `.venv/bin/python tests/prd03_exit_gate.py` | Passed after the new migration. The browser recovered 38 events and verified the replacement worker receipt. Evidence is in `.reprostamp/prd03-gates-thuh18b6/`. |
+
+The owner selected the dedicated fixture and authorized a temporary Cloudflare Quick Tunnel for the webhook. `gh repo create --private`, `git push --set-upstream origin main`, and `gh api repos/samsaturn007-git/reprostamp-checkout-pilot/commits/main` confirmed the private repository and expected baseline SHA. Homebrew installed `cloudflared` and `cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8001` assigned an HTTPS URL. The dashboard and evidence remain on loopback.
+
+The private ReproStamp Checkout Pilot App was registered and installed with access to the checkout fixture only. The App key authenticated with `GET /app`, and `GET /repos/{owner}/{repo}/installation` confirmed a selected-repository installation. The scoped installation token listed one repository, read check runs, and fetched the private baseline into a fresh Git repository. The dashboard and the GitHub integration use the owner-managed pilot registry.
+
+The original temporary tunnel stopped resolving. A new Quick Tunnel forwarded an unsigned webhook request as HTTP 401, a dashboard path as HTTP 404, and a locally signed ping as HTTP 202. The first App's webhook returned to inactive after saving, and its authenticated `GET /app/hook/config` and `PATCH /app/hook/config` returned HTTP 404. The owner approved registering ReproStamp Checkout Webhook Pilot from a GitHub App manifest with the webhook active at creation. The GitHub API confirmed TLS verification, the `pull_request` event subscription, and installation access to the checkout fixture only.
+
+### Live GitHub exit checks
+
+| Command or check | Observed result |
+| --- | --- |
+| `REPROSTAMP_REGISTRY=.reprostamp/prd04/registry.json .venv/bin/python -m reprostamp.github --config .reprostamp/prd04/manifest-live/github.json` | Served the signed webhook on loopback port 8001 through the authorized temporary tunnel. The installation token fetched each candidate into the registered baseline-only checkout. |
+| `REPROSTAMP_REGISTRY=.reprostamp/prd04/registry.json .venv/bin/python .reprostamp/prd04/live-pilot.py .reprostamp/prd04/manifest-live/github.json` | Pushed three fixture commits and opened [pull request #1](https://github.com/samsaturn007-git/reprostamp-checkout-pilot/pull/1). The first commit `c360789b` received a `failure` check. While the interim commit `8ff30052` was running, the PR moved to `27fba0df`. GitHub reported the interim evidence as superseded with a `neutral` conclusion and the final fix as `success`. The three check detail URLs identified the matching runs and their offline receipts recorded the exact tested head SHAs. |
+| GitHub App delivery history and one `POST /app/hook/deliveries/{id}/attempts` | GitHub reported HTTP 202 for the opening event and both synchronize events. Redelivery of the opening event returned HTTP 202 and retained one queue entry for its delivery ID. |
+| `gh pr view 1 --repo samsaturn007-git/reprostamp-checkout-pilot --json headRefOid,state,url,statusCheckRollup` | Confirmed the open PR's head is `27fba0df8e6c2ede162e75e63daa9b8d6223059d` and its ReproStamp check is completed with `SUCCESS`. |
+| PostgreSQL run metrics and receipt verification | Three live runs on the pinned Linux ARM64 image produced 36 browser attempts and 72 case executions. Queue times were 126, 382, and 26,552 ms. Summed browser attempt durations were 42.053, 34.420, and 30.411 seconds. All three bundles verified and Docker reported no remaining comparison containers. The live run logged zero worker recoveries and publish failures. The local response-loss recovery result is recorded above. |
+| `npm --prefix dashboard run typecheck`, `.venv/bin/python -m compileall -q src tests`, `.venv/bin/python -m pip check`, and `git diff --check` | Passed. |
+
+All PRD-04 exit checks passed on 23 November 2026. Live evidence is in `.reprostamp/prd04/github-live-checks.json`, `.reprostamp/prd04/github-live-deliveries.json`, and `.reprostamp/prd04/live-manifest-integration.log`. The local receipts and simulated response-loss evidence are in `.reprostamp/prd04-pilot-dt5yb8gu/`.
+
+## PRD-05 dependency audit
+
+Rechecked the pre-PRD setup and PRD-01 through PRD-04 on 23 November 2026. All prerequisite exit gates passed. The live audit used the existing approved PR and read-only GitHub API calls.
+
+| Command or check | Observed result |
+| --- | --- |
+| `./scripts/setup.sh --all-browsers` and `shasum -a 256 -c CONTENTS_SHA256.txt` from `docs/reference/original_prd_pack` | Pinned Linux ARM64 loopback smoke passed in Chromium `159.0.8154.6`, Firefox `159.0`, and WebKit `27.2`. All 10 archive checksums matched. |
+| `.venv/bin/python tests/prd01_exit_gate.py` | All 10 scenarios passed. Four timed-out workloads reached app readiness and were cleaned up. Evidence is in `.reprostamp/prd01-gates-h9z45wnq/`. |
+| `.venv/bin/python tests/prd02_exit_gate.py` | Both repositories passed the three-engine matrix with 12 attempts and 24 case executions each. The independent checkout replay matched. The tampering, missing evidence, changed oracle, and unavailable image and browser checks passed. Evidence is in `.reprostamp/prd02-gates-8zy5g7hs/`. |
+| `.venv/bin/python tests/prd03_exit_gate.py` and `npm --prefix dashboard run build` | The browser recovered 38 ordered events and downloaded the recovered receipt and trace. Migration, stale completion, duplicate submission, cancellation, download authorization, and expiry checks passed. The dashboard built successfully. Evidence is in `.reprostamp/prd03-gates-r3hpl0x8/`. |
+| `.venv/bin/python tests/prd04_pilot.py` | All local pilot checks passed. Three pinned Linux ARM64 runs produced 36 browser attempts and 72 case executions. The first Check creation response was lost, and reconciliation found the original check after approximately 5.1 seconds. Evidence is in `.reprostamp/prd04-pilot-m68umg6w/`. |
+| `gh pr view 1 --repo samsaturn007-git/reprostamp-checkout-pilot --json headRefOid,state,url,statusCheckRollup`, `gh api repos/samsaturn007-git/reprostamp-checkout-pilot/check-runs/{check_id}`, and offline `verify_bundle` | The current PR head still shows `success`. Both older checks now show superseded `neutral`. The historical failure is recorded in the live pilot capture. All three GitHub head SHAs and detail URLs matched the retained receipts, which verified offline and recorded 12 attempts each. The archived duplicate redelivery response was HTTP 202 with one delivery row and one run. |
+
+## PRD-05
+
+Started on 23 November 2026. `reprostamp suggest` previews the issue summary, the receipt's repeated baseline assertion, and owner-selected files at the base commit. The approval digest binds this context to the provider, budgets, and output directory. The CLI validates the resulting changes in disposable Git storage and saves the proposal, patch hash, and usage metadata. The maintainer applies and commits any changes separately. [Run the suggestion workflow](../README.md#review-a-repair-suggestion)
+
+| Command or check | Observed result |
+| --- | --- |
+| `.venv/bin/python tests/prd05_exit_gate.py .reprostamp/prd02-gates-8zy5g7hs/checkout/receipt.zip` | Passed. The deterministic provider exported two reviewed proposals. A separate checkout applied and committed each patch, then compared the resulting commit against the receipt's original base. Both runs completed in Chromium, Firefox, and WebKit on Linux ARM64, with 12 attempts and 24 case executions each. |
+| Verified patch `4099d926ff9e8fbc97a6f9b18f1c9cab845782fc` | `VERIFIED` with `expected_fix_confirmed`. The candidate passed the discount assertion and the full-price regression in all six candidate attempts. The offline receipt recorded the exact reviewed commit. |
+| Plausible patch `6da4e467f4a30a3b06d4d0a0513ff06df091dc7e` | `FAILED` with `candidate_assertion_failed`. The candidate charged `$95.00` in all six candidate attempts. The full-price regression passed. The offline receipt recorded the exact reviewed commit. |
+| `env PATH=/usr/bin:/bin .venv/bin/reprostamp verify` against both PRD-05 receipt ZIPs | Offline verification passed for all 37 files in the `VERIFIED` bundle and all 49 files in the `FAILED` bundle. |
+| Approval, scope, and budget checks in `tests/prd05_exit_gate.py` | Passed for a changed issue after approval, reused output path, malformed and duplicate JSON properties, protected tests, dependency locks and workflow paths, unselected files, mode changes, a patch that could not apply to the base, input and output byte limits, and an unreadable provider response. Preview used the committed source while the checkout contained uncommitted changes. |
+| Simulated OpenAI adapter checks in `tests/prd05_exit_gate.py` | Preview and mismatched approval made no HTTP calls. A valid approval sent the reviewed context with tools disabled. The adapter rejected a simulated tool request while the issue contained untrusted instructions. It also handled output token exhaustion and HTTP 503. The successful simulated response reported 123 input tokens and 45 output tokens. The deterministic provider reported byte counts with token counts unset. |
+| `git diff --check`, `.venv/bin/python -m compileall -q src scripts tests`, `.venv/bin/python -m pip check`, and `docker compose --file compose.prd03.yml config --quiet` | Passed. Docker listed zero comparison containers after the exit checks. |
+
+The deterministic exit checks passed. Proposals, metadata, and browser receipts are in `.reprostamp/prd05-gates-nzx8x67l/`. This run used deterministic and simulated responses.
+
+On 23 November 2026, `.venv/bin/reprostamp suggest` previewed one `gpt-5.4-mini` request using the checkout receipt, the fixture's `src/checkout.ts`, and a 2,048-token output cap. The historical preview is in `.reprostamp/prd05-cloud-34mkiK/preview.json`. A live OpenAI request remains untested because no API key was available. OpenAI usage was zero.
+
+### Live inference without an API key
+
+On 23 November 2026, Homebrew installed Ollama `0.40.16`. `OLLAMA_NO_CLOUD=1 OLLAMA_HOST=127.0.0.1:11434 ollama serve` started a temporary server with cloud features disabled. The model cache and artifacts are in `.reprostamp/prd05-ollama/`. `env -u OPENAI_API_KEY .venv/bin/reprostamp suggest ... --ollama-model qwen2.5-coder:1.5b --approve <preview SHA-256>` sent only the reviewed checkout context to loopback with a 2,048-token cap. [Ollama local setup](https://docs.ollama.com/faq#how-do-i-disable-ollamas-cloud-features)
+
+| Command or check | Observed result |
+| --- | --- |
+| `ollama pull qwen2.5-coder:1.5b` and the loopback `/api/tags` endpoint | Downloaded the model with digest `d7372fd828518a4d38b1eb196c673c31a85f2ed302b3d1e406c4c2d1b64a0668`. |
+| First approved local request and diagnostic repeat | Each used 549 input tokens and 666 output tokens. Both returned an invalid unified diff, and ReproStamp rejected them. |
+| Approved request with clarified patch-format instructions | Used 602 input tokens and 326 output tokens. The diff passed applicability and scope checks. Its explanation identified the arithmetic bug, but review found the diff altered unrelated code and left the bug in place. The proposed diff is in `retry-proposal/candidate.patch`. |
+| Approved request with a focused checkout issue summary | Used 640 input tokens and 257 output tokens. ReproStamp rejected the malformed diff. The exact context is in `focused-preview.json`. |
+| `ollama pull qwen2.5-coder:3b` and approved comparison request at the same context and budgets | The model digest was `f72c60cabf6237b07f6e632b2c48d533cef25eda2efbd34bed21c5e9c01e6225`. The response used 640 input tokens and 200 output tokens. ReproStamp rejected the diff because it made no file changes. |
+| `reprostamp compare --repo .reprostamp/prd05-ollama/verification-app --profile .reprostamp/prd05-ollama/verification-profile.json --base checkout-base --head HEAD --out .reprostamp/prd05-ollama/reviewed-comparison` | A reviewer removed the unrelated edits and corrected the arithmetic before committing `1a3456f639399c6e4d3440ec8c2a1f293caed499`. The reviewed commit returned `VERIFIED` with 12 attempts and 24 case executions across Chromium, Firefox, and WebKit. Offline `verify` checked all 37 receipt files. |
+| `.venv/bin/python tests/prd05_exit_gate.py .reprostamp/prd02-gates-8zy5g7hs/checkout/receipt.zip` | Passed after the provider changes. Both simulated adapters passed their contract checks. The two deterministic browser runs returned `VERIFIED` and `FAILED` as expected. Evidence is in `.reprostamp/prd05-gates-emn_a4_n/`. |
+
+The live local run made five Ollama requests, totaling 2,980 input tokens and 2,115 output tokens reported by the server. One proposal passed patch validation and required reviewer edits. The independently verified receipt is in `.reprostamp/prd05-ollama/reviewed-comparison/receipt.zip`. The temporary Ollama server was stopped, the model cache was retained for reuse, and the hosted OpenAI adapter remains untested with a live key.
+
+## PRD-06 dependency audit
+
+Rechecked setup and PRD-01 through PRD-05 on 24 November 2026. PRD-04 is the direct dependency for PRD-06. The optional hosted PRD-05 adapter still has no live result.
+
+| Command or check | Observed result |
+| --- | --- |
+| `./scripts/setup.sh --all-browsers` and `shasum -a 256 -c CONTENTS_SHA256.txt` from the original PRD pack directory | Chromium, Firefox, and WebKit passed the pinned Linux ARM64 loopback checks. All 10 archive checksums matched. |
+| `.venv/bin/python tests/prd01_exit_gate.py` | All 10 scenarios passed. Four timed-out workloads reached app readiness and were removed. Evidence is in `.reprostamp/prd01-gates-4h4s1sle/`. |
+| `.venv/bin/python tests/prd02_exit_gate.py` | Both three-browser matrices, independent replay, offline integrity checks, and missing or unsupported cells passed. Evidence is in `.reprostamp/prd02-gates-7jaoptgk/`. |
+| `.venv/bin/python tests/prd03_exit_gate.py` | Passed with the PRD-06 schema. The replacement worker recovered frozen inputs, the browser resumed 38 ordered events, and owner authorization, cancellation, and retention passed. Evidence is in `.reprostamp/prd03-gates-g5_112b5/`. |
+| `.venv/bin/python tests/prd04_pilot.py` | The local pilot passed signature and scope checks, duplicate handling, lost-response reconciliation, and moving-head checks with real browser workloads. Evidence is in `.reprostamp/prd04-pilot-spmk0dmk/`. |
+| `gh pr view 1 --repo samsaturn007-git/reprostamp-checkout-pilot --json headRefOid,state,url,statusCheckRollup`, `gh api repos/samsaturn007-git/reprostamp-checkout-pilot/check-runs/{check_id}`, and offline `reprostamp verify` on the three retained bundles | GitHub reported success for `27fba0df` and neutral for the two superseded heads. Both superseded receipts retained their recorded failed verdicts. All three bundles verified. The archived redelivery showed HTTP 202, one delivery row, and one run. |
+| `.venv/bin/python tests/prd05_exit_gate.py .reprostamp/prd02-gates-8zy5g7hs/checkout/receipt.zip` and `reprostamp verify .reprostamp/prd05-ollama/reviewed-comparison/receipt.zip` | The reviewed deterministic commits returned `VERIFIED` and `FAILED` as expected. Provider and approval checks passed. The prior local-model reviewed receipt verified all 37 files. Evidence is in `.reprostamp/prd05-gates-20vkbqgy/`. |
+
+## PRD-06
+
+Implemented and verified on 24 November 2026. **Replay failing case** queues five isolated attempts for the selected browser and case using the source commit and frozen profile. The dashboard shows durations, outcomes, and available traces. Replay classifications remain separate from verification verdicts. Repository failure history groups receipt-backed application assertions and runner or dependency failures. [Dashboard workflow](../README.md#replay-a-failing-case)
+
+| Command or check | Observed result |
+| --- | --- |
+| `.venv/bin/python -m reprostamp.control migrate` | Upgraded the existing PostgreSQL database from `0002_github_pilot` to `0003_case_replays`. A repeat made no schema changes. The exit suite also migrated a fresh database. |
+| `.venv/bin/python tests/prd06_exit_gate.py` | Passed on the pinned Linux ARM64 runner. Replays produced five attempts per fixture, including traces on passing attempts. The runner startup failure recorded five incomplete attempts with logs. A replay used the original commit and harness after the registered ref and harness moved. The suite checked owner authorization, idempotency, and evidence expiry. |
+| Repository failure history in `tests/prd06_exit_gate.py` | Grouped eight `checkout.full-price` failures at `src/checkout.ts:17` across Chromium, Firefox, and two receipts, with distinct first and last observation times. The startup failure appeared separately. |
+| Dashboard browser checks in `tests/prd06_browser.cjs` | Submitted a replay from the failed attempt, showed five durations and trace links, and opened the original attempt from the replay. The mobile layout at `390 × 844` showed all four outcome columns without horizontal scrolling. |
+| `env PATH=/usr/bin:/bin .venv/bin/reprostamp verify .reprostamp/prd06-gates-80hx9nho/consistent-receipt.zip` | Verified all 33 files offline. The original receipt retained its `FAILED` verdict and `candidate_regression` reason. |
+| `npm --prefix dashboard run build`, `.venv/bin/python -m compileall -q src scripts tests`, `.venv/bin/python -m pip check`, and `git diff --check` | Passed. Docker reported zero remaining comparison containers after the exit suite. |
+
+| Labeled fixture | Passing attempts | Assertion failures | Infrastructure failures | Replay classification |
+| --- | ---: | ---: | ---: | --- |
+| Consistent regression | 0 | 5 | 0 | Consistent failure |
+| Mixed assertion | 3 | 2 | 0 | Suspected flaky |
+| Runner startup failure | 0 | 0 | 5 | Infrastructure failure |
+| Order-dependent assertion | 5 | 0 | 0 | Passed on replay |
+
+The order-dependent case passed all five isolated attempts. The original failed attempt stayed visible, and its receipt remained byte-for-byte identical. No PRD-06 exit checks remain open. The final evidence is in `.reprostamp/prd06-gates-80hx9nho/`, including `classifications.json`, `failure-groups.json`, source receipts, and desktop and mobile screenshots.
+
+## PRD-07
+
+Implemented on 24 November 2026. The recorded live PRD-04 gate and a fresh local GitHub pilot run verified the direct dependency. `.venv/bin/python tests/prd04_pilot.py` retried a lost check-creation response, published failure and success for the tested commits, and preserved evidence for a superseded head. The post-migration pilot passed again and retained its logs and receipts in `.reprostamp/prd04-pilot-g59ayht3/`. Offline verification matched the three archived live receipts to their recorded SHAs and 12 attempts each. [PRD-07 specification](prds/PRD-07-visual-accessibility-review.md) · [Dashboard workflow and keyboard walkthrough](../README.md#review-visual-and-accessibility-changes)
+
+The profile selects a browser and routes. The approved harness captures each route twice per commit under the pinned image, viewport, fonts, and page seed. The receipt includes the pixel diff and newly detected axe findings. Checks default to advisory. The single dashboard owner can approve the exact candidate screenshot, and a fresh comparison uses approvals available at its first worker claim.
+
+| Command or check | Observed result |
+| --- | --- |
+| `.venv/bin/python -m reprostamp.control migrate` | Upgraded the existing database from `0003_case_replays` to `0004_route_reviews`. A repeat made no schema changes. The pilot also migrated a fresh database. |
+| `.venv/bin/python scripts/prepare_fixture.py checkout-review` | Created an independent versioned review harness snapshot and prewarmed its locked Playwright and axe-core `4.14.1` dependencies. The checkout commits matched the existing fixture tags. |
+| `.venv/bin/reprostamp compare --repo .reprostamp/checkout/repo --profile profiles/checkout-review.json --base checkout-base --head checkout-fixed --out .reprostamp/prd07-sample-lEDFgK/compare` | Returned `VERIFIED` after 12 functional attempts on Chromium, Firefox, and WebKit. The configured Chromium route showed zero changed pixels and no new axe findings. The receipt verified all 40 files. |
+| `.venv/bin/python tests/prd07_exit_gate.py` | Passed on Linux ARM64, Chromium `159.0.8154.6`, viewport `1100 × 800`, and seed `42`. The three screenshots matched their manifest hashes and the diff contained exactly 43,249 changed pixels for the first layout shift. Axe reported the new `label` violation at `#promo` with critical impact. The other configured route remained unchanged. |
+| Dashboard and keyboard checks in the PRD-07 gate | Viewed the three authenticated images, approved the candidate from the dashboard with Enter, opened approval history, and confirmed that the review fit a `390 × 844` viewport. The checkout walkthrough confirmed visible focus on the input and Apply button, reverse tab order, and the status message after keyboard submission. |
+| Approval and integrity checks in the PRD-07 gate | Anonymous requests and requests with an invalid CSRF token were rejected. Incorrect receipt and screenshot hashes were rejected. Retrying approval retained one record. The source receipt stayed byte-for-byte identical, and approval history remained visible after the source run expired. Offline verification rejected a tampered screenshot binding even with a recomputed receipt payload hash. |
+| `env PATH=/usr/bin:/bin .venv/bin/reprostamp verify` on the advisory, approved, and replayed receipts | Each bundle verified all 19 files. A CLI replay reproduced the approved screenshot binding and linked its source payload hash. |
+| `.venv/bin/python tests/prd03_exit_gate.py` | Passed after the PRD-07 migration. The browser recovered 38 ordered events and downloaded the receipt and trace. Lease recovery, cancellation, owner authorization, and evidence expiry passed. Evidence is in `.reprostamp/prd03-gates-kr9sfqsw/`. |
+| `npm --prefix dashboard run build`, `npm --prefix dashboard run typecheck`, `.venv/bin/python -m compileall -q src scripts tests`, `.venv/bin/python -m pip check`, `docker compose --file compose.prd03.yml config --quiet`, and `git diff --check` | Passed. |
+
+| Pilot scenario | Execution state | Verification verdict | Route review result |
+| --- | --- | --- | --- |
+| Advisory layout shift and unlabeled promo input | Completed | `VERIFIED` | 43,249 changed pixels and one new axe finding |
+| Required accessibility check | Completed | `FAILED` | `required_accessibility_regression` |
+| Required intentional screenshot change | Completed | `FAILED` | `required_visual_change` |
+| Exact rerun with the owner's approval | Completed | `VERIFIED` | Screenshot approved with the original commit, profile, browser build, and digest |
+| Later screenshot | Completed | `FAILED` | 75,520 changed pixels and fresh approval required |
+| Same screenshot bytes on a different commit | Completed | `FAILED` | Fresh approval required |
+| Missing advisory route evidence | Completed | `VERIFIED` | Both route checks unavailable |
+| Missing required visual evidence | Completed | `INCONCLUSIVE` | `required_visual_unavailable` |
+
+No PRD-07 exit checks remain open. Both full gate runs passed. Browser screenshots, receipts, the replay, and service logs from the repeat run are in `.reprostamp/prd07-gates-wpuybh_2/`. Docker listed zero comparison containers after that run.
+
+## PRD-08 dependency audit
+
+On 24 November 2026, rechecked setup and the exit gates for PRD-01 through PRD-07. The dashboard audit exposed two races. The **New run** buttons now wait for registry loading, and the event stream opens a new connection with its last observed cursor if an HTTP error permanently closes the browser's connection. The recovery test waits for an actual proxy error before restarting the API.
+
+| Command or check | Observed result |
+| --- | --- |
+| `./scripts/setup.sh --all-browsers`, `scripts/prepare-checkout.py`, `scripts/prepare_fixture.py shipping`, `scripts/prepare_fixture.py checkout-review`, and the original pack's `shasum -a 256 -c CONTENTS_SHA256.txt` | All three pinned Linux ARM64 browsers and all 10 archive checksums passed. All fixture caches and frozen harnesses were prepared. |
+| `.venv/bin/python tests/prd01_exit_gate.py` | All 10 scenarios passed. The four deadline tests reached app readiness and cleaned up afterward. Evidence is in `.reprostamp/prd01-gates-sguzz090/`. |
+| `.venv/bin/python tests/prd02_exit_gate.py` | Checkout and shipping each passed 12 browser attempts and 24 case executions. Independent replay, bundle integrity, and missing input checks passed. Evidence is in `.reprostamp/prd02-gates-y6bt8u2r/`. |
+| `.venv/bin/python -m reprostamp.control openapi .reprostamp/prd03/openapi.json`, `npm --prefix dashboard run generate`, and `.venv/bin/python tests/prd03_exit_gate.py` | The repaired dashboard recovered 34 ordered events through the proxy outage using event 3 as its cursor. It downloaded one receipt and a trace. Fencing, cancellation, exhausted recovery, authorization, expiry, and migration passed. Evidence is in `.reprostamp/prd03-gates-7l6jq8ux/`. |
+| `gh pr view 1`, `gh api repos/samsaturn007-git/reprostamp-checkout-pilot/check-runs/{check_id}`, and offline `verify_bundle` for the live pilot | GitHub still reports success at `27fba0df` and neutral for both superseded heads. All three GitHub SHAs and evidence links matched the archived receipts, each with 12 attempts. The archived duplicate redelivery returned HTTP 202 with one delivery row and one run. |
+| `.venv/bin/python tests/prd04_pilot.py` | The sequential rerun passed signed intake, fork exclusion, deduplication, reconciliation after a lost response, and supersession while the pinned browser workloads ran. Three runs covered 36 browser attempts and 72 case executions. Queue times were 311, 526, and 244 ms. Summed browser attempt times were 54.820, 47.052, and 46.388 seconds. Reconciliation took 5.191 seconds after the publication failure. Evidence is in `.reprostamp/prd04-pilot-x_m6j7tf/`. |
+| Offline `reprostamp verify` on the two PRD-05 deterministic proposals and the local-model comparison | The reviewed candidates retained `VERIFIED`, `FAILED`, and `VERIFIED` respectively. The hosted OpenAI adapter has simulated coverage and no live result. |
+| `.venv/bin/python tests/prd05_exit_gate.py .reprostamp/prd02-gates-y6bt8u2r/checkout/receipt.zip` | Both reviewed proposals matched their expected verdicts after 12 attempts each. The approval, budget, patch scope, and simulated adapter checks passed. The repeat after sharing the provider request and usage code with PRD-08 also passed. Evidence is in `.reprostamp/prd05-gates-w93qcc57/` and `.reprostamp/prd05-gates-ihw_8rub/`. |
+| `verify_bundle` on the four retained PRD-06 receipts and review of `classifications.json` | All original receipts verified. The four labeled five-attempt replays confirmed consistent failure, suspected flake, infrastructure failure, and pass on replay. The original order-dependent assertion failure remains visible in its receipt. |
+| `.venv/bin/python tests/prd06_exit_gate.py` | The sequential rerun matched all four replay classifications and passed the dashboard, grouped history, authorization, idempotency, and expiry checks. Evidence is in `.reprostamp/prd06-gates-8ioyvfxj/`. |
+| `verify_bundle` on the eight retained PRD-07 receipts and the offline replay | All nine bundles verified. The seeded change recorded 43,249 changed pixels and the critical axe `label` finding at `#promo`. The owner approval replayed against its exact binding. Later screenshots and a different commit required review. Advisory and required outcomes matched the profile. |
+| `.venv/bin/python tests/prd07_exit_gate.py`, `npm --prefix dashboard run build`, and `npm --prefix dashboard run typecheck` | All eight route review scenarios, exact approval replay, keyboard and mobile dashboard checks, and the production build and typecheck passed. Evidence is in `.reprostamp/prd07-gates-_1vygrdy/`. |
+
+The retained local PRD-04 pilot log and check capture also confirm reconciliation after one lost response, two conclusive checks, and a third run superseded during execution. An earlier parallel rerun exceeded the pilot's 120-second wait on the moving-head case. The sequential rerun passed. No PRD-01 through PRD-07 exit checks remain open.
+
+## PRD-08
+
+Started on 24 November 2026 after checking the previous exit gates. The starter uses one React and FastAPI task-tracker template. The request or local JSON controls the project name, optional task fields, and ordered status labels. The CLI exports locked source and a `starter_validation` receipt. [PRD-08 specification](prds/PRD-08-verified-app-starter.md) · [Starter workflow](../README.md#generate-and-validate-a-task-tracker)
+
+| Command or check | Observed result |
+| --- | --- |
+| `.venv/bin/reprostamp starter prepare --cache .reprostamp/prd08-cache` | Downloaded the pinned pip wheel, locked Python wheels, and npm dependencies. Validation used the existing Playwright image on Linux ARM64 with offline installs and loopback-only networking. |
+| `.venv/bin/python tests/prd08_exit_gate.py --cache .reprostamp/prd08-cache` | Field Notes, Studio Requests, and an unzipped Studio Requests rerun each passed 9 checks across Chromium `159.0.8154.6`, Firefox `159.0`, and WebKit `27.2`. Each engine checked FastAPI health, task CRUD, and creation, editing, completion, and persistence after a page reload in the browser. The suite rejected an invalid configuration and incorrect approval before creating output. An altered source archive in the receipt failed integrity verification. Evidence is in `.reprostamp/prd08-gates-smnh66l3/`. |
+| Initial comparison with `starter generate --config examples/starter/field-notes.json` | API checks passed and the browser journey failed in all three engines. The priority label wrapped the select and included its option text. Explicit labels fixed the issue. The initial failure receipt and all three traces verified offline in `.reprostamp/prd08-field-first/`. |
+| Startup commands from the extracted Studio Requests README | A clean venv installed the locked dependencies, `npm ci` and `npm run build` passed, and Uvicorn served the app and health endpoint on a free loopback port. A task created through the API persisted across a restart via SQLite. Logs are in `.reprostamp/prd08-host-smoke/uvicorn.log`. |
+| `starter generate --description examples/starter/field-notes.txt --ollama-model qwen2.5-coder:3b` preview and matching `--approve` request | One live request to loopback with `OLLAMA_NO_CLOUD=1` returned the requested configuration. Ollama reported 141 input and 42 output tokens. The generated app passed all 9 isolated checks. The usage record and receipt are in `.reprostamp/prd08-live/`. The temporary Ollama server was stopped. |
+| `env PATH=/usr/bin:/bin .venv/bin/reprostamp starter verify` on both sample bundles, the extracted-source rerun, and the live bundle | All four passing bundles verified 8 files each without Docker or Node.js on `PATH`. |
+| Clean venv, `python -m pip install .`, and `python tests/prd08_exit_gate.py --mock-only` | The local CI command passed all 9 deterministic checks from the installed package and a fresh dependency cache. The package includes the maintained template and independent harness. Evidence is in `.reprostamp/prd08-gates-_7hmcoyt/`. |
+| `.venv/bin/python tests/prd01_exit_gate.py` after sharing the isolated container runner with the starter | All 10 scenarios passed again. All four deadline cases reached app readiness and cleaned up after the timeout. Docker reported no remaining comparison containers. Evidence is in `.reprostamp/prd01-gates-ewgv76s1/`. |
+
+The PRD-08 exit gate passed locally. The GitHub Actions workflow is configured, with a hosted run pending. Live inference was verified with local Ollama. The optional hosted OpenAI path has simulated provider coverage from PRD-05 and no live result.

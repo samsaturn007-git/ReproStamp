@@ -119,4 +119,152 @@ node tools/runner-smoke/node_modules/@playwright/test/cli.js install chromium
 
 The exit check starts an isolated PostgreSQL database, API, worker, and dashboard. It captures a browser recording, downloads, and logs under `.reprostamp/`. [PRD-03 specification](docs/prds/PRD-03-dashboard-and-durable-runs.md)
 
+## Run the GitHub pilot
+
+Use one private, developer-owned repository with a local checkout and an owner-managed profile. Set `REPROSTAMP_REGISTRY` for the GitHub process and dashboard API to the registry that contains the approved checkout. Keep the independent harness, profile, npm cache, and App keys outside the application. Apply the schema with `.venv/bin/python -m reprostamp.control migrate` and start the dashboard and worker as above. The existing worker executes pilot and dashboard runs through the same queue.
+
+Register a private GitHub App with **Contents** and **Pull requests** set to read, **Checks** set to read and write, and the **Pull request** event selected. Configure the webhook URL as an HTTPS endpoint ending in `/github/webhook`, enable TLS verification, and install the App only on the approved repository. Store the webhook secret and App PEM in owner-only files. [GitHub App registration](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app)
+
+Create a GitHub configuration JSON file outside the application tree. These example numeric IDs stand for the App, its installation, and the approved GitHub repository. Relative credential paths resolve from the configuration file.
+
+```json
+{
+  "app_id": 1234,
+  "installation_id": 5678,
+  "repository_id": 9012,
+  "repository": "owner/checkout-fixture",
+  "profile_id": "checkout-pilot",
+  "dashboard_url": "http://127.0.0.1:3000",
+  "webhook_secret_file": "webhook-secret",
+  "private_key_file": "app.pem"
+}
+```
+
+Run the integration with OpenSSL and Git installed. Terminate HTTPS at the endpoint that forwards the webhook to port 8001. The integration serves the webhook only. The dashboard link in the check is accessible to the local owner with a loopback dashboard origin.
+
+```sh
+REPROSTAMP_REGISTRY=/path/to/registry.json .venv/bin/python -m reprostamp.github --config /path/to/github.json
+```
+
+Open a same-repository pull request through the usual GitHub workflow. The ReproStamp check links to the evidence for the tested SHA. It reports `success` for `VERIFIED`, `failure` for `FAILED`, and `action_required` for `INCONCLUSIVE` or `POLICY_BLOCKED`. When refs move, the old check and dashboard label the evidence as superseded. View the check's details to inspect the immutable SHAs, attempts, and verdict reasons. Branch protection is opt-in.
+
+To disconnect, disable the App webhook or suspend the repository installation and stop the integration. To recover, restart it with the same database and configuration. GitHub's App delivery history can redeliver missed events. The integration checks for an existing remote check before retrying a creation with an uncertain response. Its logs report queue time, total duration from browser attempts, worker retries, and publish failures. [GitHub webhook redelivery](https://docs.github.com/en/webhooks/testing-and-troubleshooting-webhooks/redelivering-webhooks)
+
+Run `.venv/bin/python tests/prd04_pilot.py` for the local checks. It uses a local GitHub HTTP test server, a fresh PostgreSQL database, and the real pinned browser runner. [PRD-04 specification](docs/prds/PRD-04-github-pilot.md)
+
+## Review a repair suggestion
+
+Start with an intact receipt that reproduced the approved baseline assertion. The CLI reads the issue summary, the repeated baseline assertion from the receipt, and the source files you select from the receipt's base commit. Choose a fresh output directory outside the application checkout. This example uses a deterministic response with the known fix from the checkout fixture. [Checkout comparison](#verify-the-checkout-fix)
+
+```sh
+repair_dir=".reprostamp/repair-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$repair_dir"
+printf '%s\n' 'SAVE10 should subtract $10 from the checkout total.' > "$repair_dir/issue.txt"
+.venv/bin/python - "$repair_dir/response.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+diff = Path("fixtures/checkout/fix.patch").read_text(encoding="utf-8")
+Path(sys.argv[1]).write_text(json.dumps({"explanation": "Subtract the promo discount.", "diff": diff}), encoding="utf-8")
+PY
+```
+
+Run the preview in Bash or Zsh and inspect its `context` and `instructions` fields. Repeat `--file` to select additional editable source files.
+
+```bash
+suggest_args=(
+  --repo .reprostamp/checkout/repo --profile profiles/checkout.json
+  --receipt "$checkout_out/receipt.zip" --issue-file "$repair_dir/issue.txt"
+  --file src/checkout.ts --response-file "$repair_dir/response.json"
+  --out "$repair_dir/proposal"
+)
+.venv/bin/reprostamp suggest "${suggest_args[@]}"
+```
+
+After reviewing the preview, copy its `approval_sha256` into the command below. The approval binds the context, provider, budgets, and output directory. An approved request makes one provider call. The output directory records the attempt and must be fresh for a new request. Set `--max-input-bytes` and `--max-output-bytes` to change the byte limits and `--max-output-tokens` to cap model generation.
+
+```bash
+.venv/bin/reprostamp suggest "${suggest_args[@]}" --approve PASTE_REVIEWED_APPROVAL_SHA256
+```
+
+Review `candidate.patch` and `suggestion.json`. ReproStamp checks that the applied changes affect only existing selected source files and exports a normalized Git diff from the recorded base SHA. To try the patch, start a branch or worktree at that SHA, apply the patch with `git apply`, review or edit the result, and commit it. Use `reprostamp compare` or **New run** in the dashboard with the approved base and your new commit SHA. The verification receipt identifies the commit executed by the independent browser runner.
+
+To use a local model without an API key, start your Ollama server with `OLLAMA_NO_CLOUD=1 OLLAMA_HOST=127.0.0.1:11434 ollama serve`. In a second terminal, download the model with `ollama pull qwen2.5-coder:1.5b`. Replace `--response-file "$repair_dir/response.json"` with `--ollama-model qwen2.5-coder:1.5b` before previewing and approving. The CLI sends the request over loopback and records the model's reported token counts. [Ollama local setup](https://docs.ollama.com/faq#how-do-i-disable-ollamas-cloud-features)
+
+For the optional OpenAI adapter, use `--openai-model MODEL` in place of `--response-file` and supply `OPENAI_API_KEY` to the CLI process. [OpenAI Responses API](https://developers.openai.com/api/reference/resources/responses/methods/create)
+
+Run the exit checks with `.venv/bin/python tests/prd05_exit_gate.py "$checkout_out/receipt.zip"`. The suite reviews and commits two deterministic proposals, verifies each in three browsers, and checks the Ollama and OpenAI adapters with simulated responses. [PRD-05 specification](docs/prds/PRD-05-ai-repair-suggestions.md)
+
+## Replay a failing case
+
+Run `.venv/bin/python -m reprostamp.control migrate`, then open a finished comparison in the dashboard while its receipt is available. Expand a browser attempt under **Attempts**, then choose **Replay failing case** beside the case you want to investigate. ReproStamp runs that browser and case five times against the recorded commit and frozen profile, with a fresh app and harness workspace each time.
+
+The replay shows each outcome, duration, and available trace. A mix of passing attempts and assertion failures is labeled **Suspected flaky** with its sample size. The replay links back to the original attempt and leaves its receipt and verification verdict intact. The original run also lists its case replays.
+
+**Repository failure history** groups receipt-backed observations by case, assertion, and application stack location when captured. Each group shows when it first and last occurred, the affected browsers, and its receipts. Runner and dependency failures appear in their own section. Required cases still come from the owner-managed profile.
+
+The shared reporter reads application locations from browser error stacks. If an approved harness captures a location separately, it can report a `reprostamp.application-location` annotation with a value such as `src/checkout.ts:17:33`.
+
+Run `.venv/bin/python tests/prd06_exit_gate.py` after dashboard setup and host Chromium installation to exercise the labeled fixtures and dashboard. [PRD-06 specification](docs/prds/PRD-06-flake-and-failure-analysis.md) · [Observed classifications](docs/IMPLEMENTATION_STATUS.md#prd-06)
+
+## Review visual and accessibility changes
+
+Provision the independent review harness with `.venv/bin/python scripts/prepare_fixture.py checkout-review`. Use [the checkout review profile](profiles/checkout-review.json) with `reprostamp compare`, or register it for **New run** in the dashboard after running `.venv/bin/python -m reprostamp.control migrate`. Keep `review.cjs`, its locked dependencies, and route definitions in the owner-managed harness and profile.
+
+```json
+{
+  "review": {
+    "engine": "chromium",
+    "routes": [
+      { "id": "checkout", "path": "/", "ready": "main h1" },
+      { "id": "confirmation", "path": "/confirmation", "ready": "#confirmation", "accessibility_required": true }
+    ]
+  }
+}
+```
+
+Choose one of the profile's functional browsers and a unique visible readiness selector per route. The harness opens a fresh browser context for each route and uses the profile's seed, viewport, locale, and time zone. Captures use the fonts in the pinned Linux image and any local font assets loaded by the application. Each result requires two consistent observations per commit. [Playwright screenshot options](https://playwright.dev/docs/api/class-page#page-screenshot) · [axe-core scan results](https://github.com/dequelabs/axe-core/blob/develop/doc/API.md)
+
+Open **Visual and accessibility review** in the run detail. Click the baseline, candidate, or pixel diff to inspect it at full size. Pink pixels mark differences. The axe table lists newly detected rule, impact, and target combinations. The receipt includes both check outcomes and all three screenshot files. Set `visual_required` or `accessibility_required` on a route to make an unapproved change or new axe finding fail verification. Missing required review evidence yields `INCONCLUSIVE`. Both checks are advisory by default.
+
+Select **Approve candidate screenshot** to accept an intentional change. Approval history records the owner, time, source receipt, commit, effective profile, browser build, and screenshot SHA-256. Submit a new run to apply that approval. Both the original receipt and the original verdict remain historical records. A later commit or screenshot needs its own approval.
+
+Run `.venv/bin/python tests/prd07_exit_gate.py` after preparing the checkout review harness, setting up the dashboard, and installing host Chromium. The pilot runs a keyboard walkthrough on `/review`. Press **Tab** to focus the promo input, type `SAVE10`, press **Tab** to reach **Apply**, and use **Shift+Tab** to confirm the reverse order. Tab back to **Apply** and press **Enter**. The walkthrough checks visible focus on both controls and the **Promo code applied** status message. [PRD-07 specification](docs/prds/PRD-07-visual-accessibility-review.md) · [Observed results](docs/IMPLEMENTATION_STATUS.md#prd-07)
+
+## Generate and validate a task tracker
+
+The starter uses one React and FastAPI template with SQLite. Title is always available. Choose `description`, `due_date`, and `priority` as optional fields, and specify two to five ordered status labels. The first label is the default for a new task. The last label marks a completed task. [Field Notes configuration](examples/starter/field-notes.json) · [Studio Requests configuration](examples/starter/studio-requests.json)
+
+After installing ReproStamp, use a Linux Docker engine and run these commands from the repository root.
+
+```sh
+starter_cache=.reprostamp/starter-cache
+starter_out=".reprostamp/starter-$(date +%Y%m%d-%H%M%S)"
+.venv/bin/reprostamp starter prepare --cache "$starter_cache"
+.venv/bin/reprostamp starter generate \
+  --config examples/starter/field-notes.json \
+  --cache "$starter_cache" --out "$starter_out"
+.venv/bin/reprostamp starter verify "$starter_out/receipt.zip"
+```
+
+`source.zip` contains the complete starter, locked dependencies, and startup and rerun instructions. Extract it into a new directory. Its README starts the built frontend and API together on `127.0.0.1:4173`. The `starter_validation` receipt records API health, task CRUD, and the create-edit-complete journey for Chromium, Firefox, and WebKit. Its ZIP contains the source archive and checksums for all included evidence. Generation and validation exit `0` for passing checks, `1` for completed checks with an assertion failure, `2` for invalid inputs, and `3` for incomplete validation. Use the engine logs in the results directory to diagnose incomplete validation. `starter verify` checks the bundle offline and reports the recorded result separately.
+
+To generate configuration from a description, preview a request, review its `context` and `instructions`, and rerun with the exact `approval_sha256`. The provider receives only that description and the template instructions. `configuration-request.json` records the provider and reported usage. The deterministic example below runs without a model service.
+
+```bash
+model_out="${starter_out}-description"
+starter_args=(
+  --description examples/starter/field-notes.txt
+  --response-file examples/starter/field-notes.json
+  --cache "$starter_cache" --out "$model_out"
+)
+.venv/bin/reprostamp starter generate "${starter_args[@]}"
+.venv/bin/reprostamp starter generate "${starter_args[@]}" --approve PASTE_REVIEWED_APPROVAL_SHA256
+```
+
+For live inference, replace `--response-file` and its path with `--ollama-model MODEL` for an installed local model or `--openai-model MODEL` with `OPENAI_API_KEY` set. Start and configure the chosen service as in [Review a repair suggestion](#review-a-repair-suggestion). The generation and validation steps run with the same template for every provider. Dependency provisioning downloads public packages, and the app and independent acceptance suite then run with loopback-only networking.
+
+Run `.venv/bin/python tests/prd08_exit_gate.py --cache "$starter_cache"` to validate both configurations and rerun the tests from the extracted source. The `--mock-only` mode runs the checked-in deterministic example in CI. [PRD-08 specification](docs/prds/PRD-08-verified-app-starter.md)
+
 The [product plan](docs/PRODUCT_PLAN.md) lists all eight PRDs and their dependencies. The [original PRD pack](docs/reference/original_prd_pack/README.md) is retained for reference.

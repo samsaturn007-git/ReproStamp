@@ -42,6 +42,7 @@ export default function Dashboard() {
     setSelected(id);
     const url = new URL(window.location.href);
     url.searchParams.set("run", id);
+    url.hash = "";
     window.history.replaceState(null, "", url);
   }
 
@@ -75,7 +76,7 @@ export default function Dashboard() {
           <aside className="sidebar" aria-label="Run history">
             <div className="sidebar-head">
               <h2>Runs</h2>
-              <button className="primary compact" onClick={() => setShowForm(true)}>New run</button>
+              <button className="primary compact" disabled={!registry} onClick={() => setShowForm(true)}>New run</button>
             </div>
             {runs.length === 0 && <p className="muted sidebar-empty">No verification runs yet.</p>}
             <ul className="run-list">
@@ -84,7 +85,9 @@ export default function Dashboard() {
                   <button className="run-link" aria-current={selected === run.id ? "true" : undefined}
                     onClick={() => { choose(run.id); setShowForm(false); }}>
                     <strong>{registry?.repositories.find((repo) => repo.id === run.request.repo_id)?.label ?? run.request.repo_id}</strong>
-                    <span className="run-link-refs">{run.request.base_ref} → {run.request.head_ref}</span>
+                    <span className="run-link-refs">{run.replay
+                      ? `Case replay · ${run.replay.case_id}`
+                      : `${run.request.base_ref} → ${run.request.head_ref}`}</span>
                     <span className="run-link-meta"><Badge value={run.verdict ?? run.state} /><time>{when(run.created_at, true)}</time></span>
                   </button>
                 </li>
@@ -100,12 +103,13 @@ export default function Dashboard() {
                 setShowForm(false);
               }} onClose={selected ? () => setShowForm(false) : undefined} />
             ) : selected ? (
-              <RunReview key={selected} id={selected} registry={registry} csrf={csrf} onUpdate={refreshItem} />
+              <RunReview key={selected} id={selected} registry={registry} csrf={csrf} onUpdate={refreshItem}
+                onReplay={(run) => { refreshItem(run); choose(run.id); }} />
             ) : (
               <section className="empty">
                 <h1>Verification runs</h1>
                 <p className="muted">Select a run to review its browser evidence, or start a new comparison.</p>
-                <button className="primary" onClick={() => setShowForm(true)}>New run</button>
+                <button className="primary" disabled={!registry} onClick={() => setShowForm(true)}>New run</button>
               </section>
             )}
           </div>

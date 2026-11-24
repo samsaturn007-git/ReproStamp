@@ -6,7 +6,11 @@ from uuid import UUID, uuid4
 
 from psycopg.types.json import Jsonb
 
+from ..receipt import verify_bundle
+from . import review_store
+from .case_replay import copy_snapshot, execution_id
 from .database import connect
+from .failures import group_failures, replay_summary
 from .inputs import freeze_inputs
 from .settings import Settings
 
@@ -17,6 +21,10 @@ RUN_FIELDS = "*, expires_at <= clock_timestamp() AS expired"
 
 
 class SubmissionConflict(ValueError):
+    pass
+
+
+class ReplayUnavailable(ValueError):
     pass
 
 
@@ -68,7 +76,7 @@ def submit(settings: Settings, key: UUID, request: dict) -> tuple[dict, bool]:
         db.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (str(key),))
         existing = db.execute(f"SELECT {RUN_FIELDS} FROM runs WHERE submission_key = %s", (key,)).fetchone()
         if existing:
-            if existing["request"] != request:
+            if existing["replay"] is not None or existing["request"] != request:
                 raise SubmissionConflict("This submission key belongs to a different run request.")
             return existing, False
         registration = settings.profiles[request["profile_id"]]
@@ -89,21 +97,104 @@ def submit(settings: Settings, key: UUID, request: dict) -> tuple[dict, bool]:
         return row, True
 
 
+def submit_replay(settings: Settings, key: UUID, source_id: UUID, selection: dict) -> tuple[dict, bool]:
+    with connect(settings) as db:
+        db.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (str(key),))
+        existing = db.execute(f"SELECT {RUN_FIELDS} FROM runs WHERE submission_key = %s", (key,)).fetchone()
+        if existing:
+            if existing["source_run_id"] != source_id or any(
+                existing["replay"][field] != value for field, value in selection.items()
+            ):
+                raise SubmissionConflict("This submission key belongs to a different run request.")
+            return existing, False
+        source = db.execute(f"SELECT {RUN_FIELDS} FROM runs WHERE id = %s FOR SHARE", (source_id,)).fetchone()
+        if source is None:
+            raise LookupError("Run not found.")
+        if source["expired"] or not source["receipt_sha"] or source["state"] not in TERMINAL:
+            raise ReplayUnavailable("Case replay requires an available source receipt.")
+        receipt = verify_bundle(generation_path(settings, source_id, source["fence"]) / "evidence" / "receipt.zip")
+        payload = receipt["payload"]
+        if receipt["payload_sha256"] != source["receipt_sha"] or payload["run_id"] != execution_id(source_id, source["fence"]):
+            raise ReplayUnavailable("The source receipt does not match this run.")
+        if payload["inputs"] is None or selection["case_id"] not in payload["plan"]["case_ids"]:
+            raise ReplayUnavailable("The source receipt has no controlled inputs for this case.")
+        attempt = next((item for item in payload["attempts"] if all(
+            item[field] == selection[field] for field in ("engine", "side", "number")
+        )), None)
+        case = next((item for item in attempt["cases"] if item["case_id"] == selection["case_id"]), None) if attempt else None
+        if attempt is None or (not attempt["reason"] and (case is None or case["status"] != "assertion_failed")):
+            raise ReplayUnavailable("Choose a failed case from the source receipt.")
+        replay = {
+            **selection, "receipt_sha": source["receipt_sha"], "commit": attempt["commit"],
+            "browser_build": attempt["browser_build"],
+            "original": {field: payload[field] for field in ("base_sha", "head_sha", "plan", "inputs")},
+        }
+        run_id = uuid4()
+        folder = run_path(settings, run_id)
+        try:
+            copy_snapshot(run_path(settings, source_id) / "inputs", folder / "inputs")
+            row = db.execute(f"""
+                INSERT INTO runs (id, submission_key, request, base_sha, head_sha, plan, state, source_run_id, replay)
+                VALUES (%s, %s, %s, %s, %s, %s, 'queued', %s, %s) RETURNING {RUN_FIELDS}
+            """, (run_id, key, Jsonb(source["request"]), source["base_sha"], source["head_sha"],
+                  Jsonb({"engines": [selection["engine"]], "case_ids": [selection["case_id"]]}),
+                  source_id, Jsonb(replay))).fetchone()
+            event(db, run_id, "queued", state="queued", source_run_id=str(source_id))
+        except BaseException:
+            shutil.rmtree(folder, ignore_errors=True)
+            raise
+        return row, True
+
+
+def attempts(db, run_id: UUID) -> list[dict]:
+    return db.execute("""
+        SELECT fence, engine, side, number, state, result FROM attempts
+        WHERE run_id = %s ORDER BY fence, engine, side, number
+    """, (run_id,)).fetchall()
+
+
 def get_run(settings: Settings, run_id: UUID) -> dict | None:
     with connect(settings) as db:
         db.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         row = db.execute(f"SELECT {RUN_FIELDS} FROM runs WHERE id = %s", (run_id,)).fetchone()
         if row is None:
             return None
-        row["attempts"] = db.execute("""
-            SELECT fence, engine, side, number, state, result FROM attempts
-            WHERE run_id = %s ORDER BY fence, engine, side, number
+        row["attempts"] = attempts(db, run_id)
+        if row["replay"] is not None:
+            row["replay_summary"] = replay_summary(row["attempts"], row["fence"])
+            if row["reason"] not in ("case_replay_finished", "case_replay_incomplete"):
+                row["replay_summary"]["classification"] = None
+        row["case_replays"] = db.execute("""
+            SELECT id, state, replay, created_at FROM runs WHERE source_run_id = %s ORDER BY created_at DESC
         """, (run_id,)).fetchall()
         row["artifacts"] = db.execute("""
             SELECT id, kind, path, size, sha256 FROM artifacts
             WHERE run_id = %s AND kind <> 'summary' ORDER BY path
         """, (run_id,)).fetchall()
+        row["visual_approvals"] = review_store.approval_history(db, row)
         return row
+
+
+def approve_visual(settings: Settings, run_id: UUID, route_id: str, receipt_sha: str, screenshot_sha: str) -> tuple[dict, bool]:
+    with connect(settings) as db:
+        row = db.execute(f"SELECT {RUN_FIELDS} FROM runs WHERE id = %s FOR SHARE", (run_id,)).fetchone()
+        if row is None:
+            raise LookupError("Run not found.")
+        root = generation_path(settings, run_id, row["fence"]) / "evidence"
+        return review_store.approve(db, row, route_id, receipt_sha, screenshot_sha, root)
+
+
+def failure_history(settings: Settings, repo_id: str) -> list[dict]:
+    with connect(settings) as db:
+        rows = db.execute("""
+            SELECT r.id, r.receipt_sha, r.expires_at <= clock_timestamp() AS expired,
+                   COALESCE(a.observed_at, r.finished_at) AS observed,
+                   r.reason, a.engine, a.result
+            FROM runs r LEFT JOIN attempts a ON a.run_id = r.id AND a.fence = r.fence AND a.result IS NOT NULL
+            WHERE r.source_run_id IS NULL AND r.receipt_sha IS NOT NULL AND r.request->>'repo_id' = %s
+              AND (a.result IS NOT NULL OR r.state = 'incomplete')
+        """, (repo_id,))
+        return group_failures(rows)
 
 
 def runs(settings: Settings) -> list[dict]:
@@ -149,7 +240,7 @@ def cancel(settings: Settings, run_id: UUID) -> dict | None:
 def claim(settings: Settings) -> dict | None:
     with connect(settings) as db:
         row = db.execute("""
-            SELECT id, state, fence, base_sha, head_sha FROM runs
+            SELECT id, state, fence, base_sha, head_sha, replay, plan, request FROM runs
             WHERE state = 'queued' OR (state IN ('running', 'cancelling') AND lease_until <= clock_timestamp())
             ORDER BY (state = 'queued'), created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED
         """).fetchone()
@@ -162,6 +253,9 @@ def claim(settings: Settings) -> dict | None:
         db.execute("""
             UPDATE runs SET state = %s, fence = %s, lease_until = clock_timestamp() + %s WHERE id = %s
         """, (row["state"], row["fence"], timedelta(seconds=settings.lease_seconds), run_id))
+        if previous == "queued" and row["plan"].get("review"):
+            snapshot = review_store.approvals_for_commit(db, row["request"]["repo_id"], row["head_sha"])
+            db.execute("UPDATE runs SET review_approval_snapshot = %s WHERE id = %s", (Jsonb(snapshot), run_id))
         if previous != "queued":
             interrupt(db, run_id)
             event(db, run_id, "lease_expired", state=row["state"], generation=row["fence"] - 1)
@@ -197,11 +291,11 @@ def observe(settings: Settings, run_id: UUID, fence: int, engine: str, side: str
             return False
         state = data["status"] if data else "running"
         db.execute("""
-            INSERT INTO attempts (run_id, fence, engine, side, number, state, result)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO attempts (run_id, fence, engine, side, number, state, result, observed_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, CASE WHEN %s THEN clock_timestamp() END)
             ON CONFLICT (run_id, fence, engine, side, number)
-            DO UPDATE SET state = EXCLUDED.state, result = EXCLUDED.result
-        """, (run_id, fence, engine, side, number, state, Jsonb(data) if data else None))
+            DO UPDATE SET state = EXCLUDED.state, result = EXCLUDED.result, observed_at = EXCLUDED.observed_at
+        """, (run_id, fence, engine, side, number, state, Jsonb(data) if data else None, data is not None))
         event(db, run_id, f"attempt_{'finished' if data else 'started'}",
               generation=fence, engine=engine, side=side, number=number, status=state)
     return True
@@ -212,13 +306,14 @@ def interrupt(db, run_id: UUID) -> None:
 
 
 def finish(db, run_id: UUID, state: str, *, verdict: str | None = None, reason: str,
-           detail: str, receipt_sha: str | None = None, engine_verdicts: dict | None = None) -> None:
+           detail: str, receipt_sha: str | None = None, engine_verdicts: dict | None = None,
+           reviews: list[dict] | None = None) -> None:
     interrupt(db, run_id)
     db.execute("""
         UPDATE runs SET state = %s, verdict = %s, reason = %s, detail = %s, receipt_sha = %s,
-          engine_verdicts = %s, finished_at = clock_timestamp(),
+          engine_verdicts = %s, reviews = %s, finished_at = clock_timestamp(),
           expires_at = clock_timestamp() + %s, lease_until = NULL WHERE id = %s
-    """, (state, verdict, reason, detail, receipt_sha, Jsonb(engine_verdicts or {}),
+    """, (state, verdict, reason, detail, receipt_sha, Jsonb(engine_verdicts or {}), Jsonb(reviews or []),
           timedelta(days=RETENTION_DAYS), run_id))
     event(db, run_id, state, state=state, verdict=verdict, reason=reason)
 

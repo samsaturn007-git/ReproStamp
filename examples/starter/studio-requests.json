@@ -1,0 +1,5 @@
+{
+  "project_name": "Studio Requests",
+  "task_fields": ["priority"],
+  "statuses": ["Inbox", "Scheduled", "Delivered"]
+}

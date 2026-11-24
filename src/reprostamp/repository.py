@@ -32,11 +32,13 @@ class Repository:
         if Path(root).resolve() != path:
             raise RepositoryError("--repo must point to the root of a local Git checkout.")
 
-    def git(self, *arguments: str, stdout=subprocess.PIPE) -> bytes:
+    def git(self, *arguments: str, stdout=subprocess.PIPE, input: bytes | None = None,
+            env_overrides: dict[str, str] | None = None) -> bytes:
         try:
             completed = subprocess.run(
                 ["git", "--no-replace-objects", "-C", str(self.path), *arguments],
-                env=self.env, stdout=stdout, stderr=subprocess.PIPE, check=True, timeout=30,
+                env=self.env | (env_overrides or {}), input=input, stdout=stdout,
+                stderr=subprocess.PIPE, check=True, timeout=30,
             )
             return completed.stdout or b""
         except subprocess.CalledProcessError as error:

@@ -7,7 +7,7 @@ name = "reprostamp"
 version = "0.1.0"
 description = "Compare Git commits using the same independent browser tests"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["Pillow==13.0.0"]
 
 [project.optional-dependencies]
 prd03 = [
@@ -24,3 +24,7 @@ reprostamp = "reprostamp.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+reprostamp = ["starter_assets/image.txt", "starter_assets/template/*", "starter_assets/template/.gitignore",
+              "starter_assets/template/src/*", "starter_assets/harness/*"]

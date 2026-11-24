@@ -1,5 +1,6 @@
 import argparse
 import fcntl
+import json
 import logging
 import os
 import shutil
@@ -9,24 +10,24 @@ import sys
 import threading
 import time
 from dataclasses import asdict
-from uuid import UUID, uuid5
+from uuid import UUID
 
 import psycopg
 
-from ..cli import BUNDLE_ERRORS, ComparisonInterrupted, compare
+from ..cli import BUNDLE_ERRORS, ComparisonInterrupted, ReplayError, compare
 from ..integrity import hash_file
+from ..profile import PolicyError
 from ..receipt import verify_bundle
+from ..repository import RepositoryError
+from ..review import REVIEW_FILES
 from ..runner import Attempt, DockerError, docker
 from . import store
+from .case_replay import execution_id, replay_output, run_case_replay
 from .database import connect
 from .settings import Settings
 
 
 log = logging.getLogger(__name__)
-
-
-def execution_id(run_id: UUID, fence: int) -> str:
-    return uuid5(run_id, str(fence)).hex
 
 
 def execute_comparison(settings: Settings, run_id: UUID, fence: int) -> None:
@@ -54,7 +55,8 @@ def execute_comparison(settings: Settings, run_id: UUID, fence: int) -> None:
 
     signal.signal(signal.SIGINT, interrupt)
     with connect(settings) as db:
-        row = db.execute("SELECT base_sha, head_sha FROM runs WHERE id = %s AND fence = %s",
+        row = db.execute("SELECT id, fence, base_sha, head_sha, replay, review_approval_snapshot FROM runs "
+                         "WHERE id = %s AND fence = %s",
                          (run_id, fence)).fetchone()
     if row is None:
         return
@@ -62,11 +64,21 @@ def execute_comparison(settings: Settings, run_id: UUID, fence: int) -> None:
     folder = store.generation_path(settings, run_id, fence)
     try:
         threading.Thread(target=check_lease, daemon=True).start()
+        if row["replay"] is not None:
+            try:
+                run_case_replay(row, inputs, folder, record)
+            except (ReplayError, PolicyError, RepositoryError, OSError) as error:
+                (folder / "replay-error.json").write_text(json.dumps({
+                    "state": "incomplete", "reason": getattr(error, "reason", "replay_input_unavailable"),
+                    "detail": str(error),
+                }), encoding="utf-8")
+            return
         compare(
             argparse.Namespace(repo=str(inputs / "repository"), profile=str(inputs / "profile.json"),
                                base=row["base_sha"], head=row["head_sha"], out=str(folder / "evidence")),
             run_id=execution_id(run_id, fence), workspace_parent=folder,
             on_attempt_start=record, on_attempt=record_finish,
+            approvals=row["review_approval_snapshot"],
         )
     except ComparisonInterrupted:
         pass
@@ -130,13 +142,13 @@ def verify_output(folder, row: dict) -> tuple[dict, list[dict]]:
     outcome = {
         "state": payload["execution_state"], "verdict": payload["verdict"], "reason": payload["reason"],
         "detail": payload["detail"], "receipt_sha": receipt["payload_sha256"],
-        "engine_verdicts": payload["engine_verdicts"],
+        "engine_verdicts": payload["engine_verdicts"], "reviews": payload.get("reviews", []),
     }
     with bundle.open("rb") as source:
         bundle_hash = hash_file(source)
     approved = [{"kind": "receipt", "path": "receipt.zip", "size": bundle.stat().st_size, "sha256": bundle_hash}]
     kinds = {"trace.zip": "trace", "screenshot.png": "screenshot", "app.log": "log", "harness.log": "log",
-             "receipt.md": "summary"}
+             "receipt.md": "summary", **dict.fromkeys(REVIEW_FILES.values(), "screenshot")}
     for path, metadata in payload["artifacts"].items():
         approved.append({"kind": kinds[path.rsplit("/", 1)[-1]], "path": path, **metadata})
     return outcome, approved
@@ -198,11 +210,16 @@ def process_run(settings: Settings, row: dict, stopping: threading.Event) -> Non
             }, []
             if folder.exists():
                 try:
-                    outcome, artifacts = verify_output(folder, row)
+                    if row["replay"] is None:
+                        outcome, artifacts = verify_output(folder, row)
+                    else:
+                        with connect(settings) as db:
+                            outcome, artifacts = replay_output(folder, row, store.attempts(db, run_id))
                 except BUNDLE_ERRORS:
-                    log.exception("Run %s generation %d did not produce an intact receipt", run_id, fence)
+                    log.exception("Run %s generation %d did not produce intact evidence", run_id, fence)
                     outcome = {"state": "incomplete", "reason": "worker_execution_failed",
-                               "detail": "The worker did not produce an intact verification receipt."}
+                               "detail": ("The worker did not produce an intact verification receipt." if row["replay"] is None
+                                          else "The worker did not produce intact case replay evidence.")}
             if store.finalize(settings, run_id, fence, outcome, artifacts):
                 return
             state = store.renew(settings, run_id, fence)

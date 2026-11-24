@@ -1,6 +1,7 @@
 import fnmatch
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -8,6 +9,8 @@ from pathlib import Path, PurePosixPath
 CASE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}\Z")
 IMAGE = re.compile(r"[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}\Z")
 ENGINES = ("chromium", "firefox", "webkit")
+REVIEW_PATH = re.compile(r"/(?!/)[!-~]{0,511}\Z")
+MAX_REVIEW_ROUTES = 8
 PROTECTED_FILES = {
     "package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock",
     "pnpm-lock.yaml", "bun.lock", "bun.lockb", ".npmrc", ".gitmodules",
@@ -39,6 +42,41 @@ class BrowserSettings:
 
 
 @dataclass(frozen=True)
+class ReviewRoute:
+    id: str
+    path: str
+    ready: str
+    visual_required: bool = False
+    accessibility_required: bool = False
+
+
+@dataclass(frozen=True)
+class ReviewPlan:
+    engine: str
+    routes: tuple[ReviewRoute, ...]
+
+
+def review_plan(data: dict, engines: Sequence[str]) -> ReviewPlan:
+    if not isinstance(data, dict) or data.keys() != {"engine", "routes"} or data["engine"] not in engines:
+        raise ValueError("Set the review engine to one of the profile's required browsers.")
+    if not isinstance(data["routes"], list) or not 1 <= len(data["routes"]) <= MAX_REVIEW_ROUTES:
+        raise ValueError(f"Configure between 1 and {MAX_REVIEW_ROUTES} review routes.")
+    routes = tuple(ReviewRoute(**item) for item in data["routes"])
+    seen = set()
+    for route in routes:
+        if not isinstance(route.id, str) or not CASE_ID.fullmatch(route.id) or route.id.lower() in seen:
+            raise ValueError("Use distinct review route IDs containing letters, numbers, dots, underscores, or hyphens.")
+        seen.add(route.id.lower())
+        if not isinstance(route.path, str) or not REVIEW_PATH.fullmatch(route.path) or "\\" in route.path:
+            raise ValueError("Review routes must be root-relative application URLs.")
+        if not isinstance(route.ready, str) or not route.ready.strip() or len(route.ready) > 512:
+            raise ValueError("Set a visible Playwright readiness selector for each review route.")
+        if any(type(value) is not bool for value in (route.visual_required, route.accessibility_required)):
+            raise ValueError("Required review settings must be booleans.")
+    return ReviewPlan(data["engine"], routes)
+
+
+@dataclass(frozen=True)
 class Profile:
     harness: Path
     npm_cache: Path
@@ -49,6 +87,7 @@ class Profile:
     timeout_seconds: int
     engines: tuple[str, ...]
     browser: BrowserSettings
+    review: ReviewPlan | None = None
 
     @property
     def case_ids(self) -> frozenset[str]:
@@ -122,6 +161,7 @@ def load_profile(path: Path, repo: Path) -> Profile:
                 raise ValueError("Browser viewport dimensions must be integers between 1 and 4096.")
         for setting in ("locale", "timezone"):
             nonempty_string(vars(settings), setting)
+        review = review_plan(data["review"], engines) if data.get("review") is not None else None
     except (OSError, KeyError, TypeError, ValueError, RuntimeError) as error:
         raise PolicyError("invalid_profile", str(error)) from error
 
@@ -130,4 +170,4 @@ def load_profile(path: Path, repo: Path) -> Profile:
     if harness.is_relative_to(repo) or repo.is_relative_to(harness) or npm_cache.is_relative_to(repo):
         raise PolicyError("inputs_inside_repository", "Keep the harness and dependency cache outside the application tree.")
 
-    return Profile(harness, npm_cache, image, expected, regressions, patterns, timeout, engines, settings)
+    return Profile(harness, npm_cache, image, expected, regressions, patterns, timeout, engines, settings, review)
