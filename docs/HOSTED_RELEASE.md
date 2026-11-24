@@ -1,18 +1,19 @@
 # Hosted demo release handoff
 
-The release record identifies the annotated tag, full commit SHA, and GitHub Actions results for the approved revision. Use that SHA for installation and for any later deployment. [PRD-11 release record](IMPLEMENTATION_STATUS.md#prd-11)
+Deploy `9d901abc608496284590b2caf63d5d98c7d8f0b6`, the commit named by the annotated `hosted-demo-rc.1` tag. Both Linux AMD64 workflows passed on that exact commit. [Release tag](https://github.com/samsaturn007-git/ReproStamp/tree/hosted-demo-rc.1) · [Hosted release checks](https://github.com/samsaturn007-git/ReproStamp/actions/runs/45440477070) · [Starter checks](https://github.com/samsaturn007-git/ReproStamp/actions/runs/45440476886) · [PRD-11 release record](IMPLEMENTATION_STATUS.md#prd-11)
 
 ## Install the tested revision
 
-Use a fresh Linux AMD64 checkout. CI uses Ubuntu 24.04, Python 3.12.16 with `venv`, and Node.js 22.23.5 with npm. Install Git, Bash, and a running native Linux AMD64 Docker Engine with the Docker Compose plugin. The operator needs Docker access. The local Compose service uses PostgreSQL 18.7 and binds to `127.0.0.1:55432`. Provisioning needs access to PyPI, npm, the Microsoft Container Registry, and Docker Hub.
+Use a fresh Linux AMD64 checkout. CI used Ubuntu 24.04, Python 3.12.16 with `venv`, and Node.js 22.23.5 with npm 10.9.9. Install Git, Bash, and a running native Linux AMD64 Docker Engine with the Docker Compose plugin. The hosted checks used Docker Engine 28.0.4 and Compose 2.38.2. The operator needs Docker access. The local Compose service uses PostgreSQL 18.7 and binds to `127.0.0.1:55432`. Provisioning needs access to PyPI, npm, the Microsoft Container Registry, and Docker Hub.
 
-Replace `APPROVED_TAG` and `APPROVED_SHA` with the release record's values. `git show --no-patch APPROVED_TAG` displays the tag annotation and the commit it names. Run the setup and build from the new checkout's root.
+The tag annotation lists the CI runs. The SHA check verifies the checkout before installation. Run the setup and build from the new checkout's root.
 
 ```sh
 git clone https://github.com/samsaturn007-git/ReproStamp.git reprostamp-release
 cd reprostamp-release
-git checkout --detach 'APPROVED_TAG'
-test "$(git rev-parse HEAD)" = 'APPROVED_SHA' || exit 1
+git show --no-patch hosted-demo-rc.1
+git checkout --detach hosted-demo-rc.1
+test "$(git rev-parse HEAD)" = '9d901abc608496284590b2caf63d5d98c7d8f0b6' || exit 1
 
 ./scripts/setup.sh --all-browsers
 .venv/bin/python scripts/prepare-checkout.py

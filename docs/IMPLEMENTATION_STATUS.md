@@ -337,7 +337,7 @@ Implemented on 24 November 2026 using the approved scope derived from the archiv
 
 The first presentation test ran after the lifecycle test had inserted a task. The harness now checks the empty state first. Early live planner responses exceeded the search-term or output limit. The final planner uses a bounded vocabulary and 128 output tokens within the shared 512-token attempt budget. Follow-up runs retained the planner failures and startup failures as separate evidence.
 
-The local PRD-09 exit gate passed. Docker listed zero remaining ReproStamp workload containers. The GitHub Actions workflow includes the golden gate and has no hosted PRD-09 result yet.
+The local PRD-09 exit gate passed. Docker listed zero remaining ReproStamp workload containers. The hosted golden gate subsequently passed at the PRD-11 release revision. [Hosted golden gate](https://github.com/samsaturn007-git/ReproStamp/actions/runs/45440476886)
 
 ## PRD-10
 
@@ -361,15 +361,37 @@ Started on 24 November 2026 after checking the recorded PRD-09 and PRD-10 local 
 
 The first hosted comparison at `313cf0e0bbe1d2fc15ce19cd64d69875a3c3bb6f` completed all 12 checkout attempts with the expected assertion outcomes. Its receipt recorded `INCONCLUSIVE` because Node named the browser platform `linux/x64` and Docker named the runner platform `linux/amd64`. Browser report ingestion now maps the Node alias to Docker's platform name for functional tests, route reviews, and starter receipts. The initial bundle still verifies offline with its recorded verdict. [Initial hosted run](https://github.com/samsaturn007-git/ReproStamp/actions/runs/45439522482)
 
-The release tag is pending successful hosted comparison and replay, durable dashboard recovery, production build, and both starter gates at the same commit.
+All release checks passed on 24 November 2026 at `9d901abc608496284590b2caf63d5d98c7d8f0b6` on Ubuntu 24.04 Linux AMD64. The remote annotated tag `hosted-demo-rc.1` resolves to that exact commit. [Release tag](https://github.com/samsaturn007-git/ReproStamp/tree/hosted-demo-rc.1) · [Hosted release checks](https://github.com/samsaturn007-git/ReproStamp/actions/runs/45440477070) · [Hosted starter checks](https://github.com/samsaturn007-git/ReproStamp/actions/runs/45440476886)
+
+| Command or check | Observed result at the tagged commit |
+| --- | --- |
+| `./scripts/setup.sh --all-browsers`, `.venv/bin/python scripts/prepare-checkout.py`, and `.venv/bin/python scripts/prepare_fixture.py shipping` | Chromium `159.0.8154.6`, Firefox `159.0`, and WebKit `27.2` loaded loopback in the pinned runner. Both owned fixture repositories, independent harnesses, and npm caches were prepared. |
+| `.venv/bin/python scripts/setup_prd03.py --release`, `.venv/bin/reprostamp --help`, `.venv/bin/python -m reprostamp.control migrate`, and `npm --prefix dashboard run build` | The wheel installed the CLI and control plane into `.venv` from a clean checkout. `pip check` passed. Compose started PostgreSQL `18.7`, migration reached `0004_route_reviews`, and OpenAPI generation, type checking, and the Next.js `16.4.6` production build passed. |
+| `.venv/bin/python tests/prd02_exit_gate.py` | Checkout, shipping, and the independent checkout replay each returned `VERIFIED` after 12 attempts and 24 case executions. All five receipt corruption cases were rejected, the replay linked the source payload and matched its case outcomes, and changed or missing inputs produced the expected verdicts. |
+| `node tools/runner-smoke/node_modules/@playwright/test/cli.js install --with-deps chromium` and `.venv/bin/python tests/prd03_exit_gate.py` | The replacement worker used frozen inputs, fenced stale writes, and published one receipt. The browser resumed from event 3, recovered 34 ordered events, and downloaded the receipt and trace. Cancellation, exhausted retry, owner authorization, and evidence expiry passed. |
+| `python tests/prd08_exit_gate.py --mock-only --cache .reprostamp/ci-starter-cache` | All nine mock starter checks passed across the three browsers. Approval, invalid configuration, and offline receipt checks passed. |
+| `python tests/prd09_exit_gate.py --cache .reprostamp/ci-starter-cache` | The golden benchmark passed 1 of 2 single-stage trials and 2 of 2 plan-and-review trials. The seeded incorrect presentation failed in all three browsers. The direct and extracted-source revalidation each passed all 12 checks with identical source hashes. The policy and context checks passed. |
+| `gh run download` for the two hosted runs, followed by offline `verify_bundle` | All 11 downloaded receipts verified. The four comparison and dashboard receipts recorded completed runs with `VERIFIED` verdicts. The seven starter receipts recorded six passing validations and the intended seeded assertion failure. Each reported `linux/amd64`. Local copies are under `.reprostamp/prd11-hosted-9d901ab/`. |
+| `.venv/bin/python tests/prd07_exit_gate.py` on the local ARM64 runner | The platform parsing change preserved all eight review scenarios, the dashboard walkthrough, and exact approval replay. Evidence is in `.reprostamp/prd07-gates-dff6w5xn/`. |
+| `git ls-remote origin 'refs/tags/hosted-demo-rc.1*'` | GitHub returned the annotated tag and its target `9d901abc608496284590b2caf63d5d98c7d8f0b6`. |
+
+The hosted build used Python `3.12.16`, Node.js `22.23.5`, npm `10.9.9`, Docker Engine `28.0.4`, and Compose `2.38.2`. The runner index is `sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579`. Docker inspected the Linux AMD64 image ID as `sha256:12708c20bc005b7ecc920dd23b27079baa55359fd2739c7f0f3070c47cf263e9`.
+
+| Dependency lock | SHA-256 recorded in hosted CI |
+| --- | --- |
+| `requirements/hosted-release.lock` | `71cc47d5e866001329260ac8cd05ee39d72b75838af82560fffc481cd9f0fb5f` |
+| `dashboard/package-lock.json` | `32972297c10f199b3ec2137b04150a41fb6efc041489202c340decc60cc74f2a` |
+| `tools/runner-smoke/package-lock.json` | `7acdc5ed3147105d0553bcf585c6f16a8d47b82f2662e0e355ed098543b7a45a` |
+
+No PRD-11 exit checks remain open. The handoff gives the exact revision and commands for the next deployment. [Release handoff](HOSTED_RELEASE.md)
 
 ## Hosted demo roadmap
 
 Planned on 24 November 2026. PRD-11 through PRD-14 define the sequence for a public HTTPS demo using the approved checkout fixture. Implementation starts with the hosted release gate.
 
-| PRD | Open exit check |
+| PRD | Exit check |
 | --- | --- |
-| [PRD-11](prds/PRD-11-hosted-demo-release-baseline.md) | Tag the revision after hosted Linux AMD64 release validation. |
+| [PRD-11](prds/PRD-11-hosted-demo-release-baseline.md) | Passed on `hosted-demo-rc.1`. |
 | [PRD-12](prds/PRD-12-deploy-hosted-verifier.md) | Verify the hosted comparison and private owner access on an approved VM with DNS. |
 | [PRD-13](prds/PRD-13-public-checkout-demo.md) | Verify an anonymous live sample, reviewed evidence, and durable submission limits. |
 | [PRD-14](prds/PRD-14-github-and-demo-launch.md) | Verify the approved GitHub walkthrough, independent replay, recovery, and backup restore. |
