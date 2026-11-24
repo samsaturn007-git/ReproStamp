@@ -304,4 +304,6 @@ Started on 24 November 2026 after checking the previous exit gates. The starter 
 | Clean venv, `python -m pip install .`, and `python tests/prd08_exit_gate.py --mock-only` | The local CI command passed all 9 deterministic checks from the installed package and a fresh dependency cache. The package includes the maintained template and independent harness. Evidence is in `.reprostamp/prd08-gates-_7hmcoyt/`. |
 | `.venv/bin/python tests/prd01_exit_gate.py` after sharing the isolated container runner with the starter | All 10 scenarios passed again. All four deadline cases reached app readiness and cleaned up after the timeout. Docker reported no remaining comparison containers. Evidence is in `.reprostamp/prd01-gates-ewgv76s1/`. |
 
-The PRD-08 exit gate passed locally. The GitHub Actions workflow is configured, with a hosted run pending. Live inference was verified with local Ollama. The optional hosted OpenAI path has simulated provider coverage from PRD-05 and no live result.
+The PRD-08 exit gate passed locally. The first hosted GitHub Actions run at `e766984` passed all nine mock configuration checks in Chromium, Firefox, and WebKit. The job finished in 1 minute 8 seconds. [Hosted starter validation](https://github.com/samsaturn007-git/ReproStamp/actions/runs/45405766943)
+
+Live inference was verified with local Ollama. The optional hosted OpenAI path has simulated provider coverage from PRD-05 and no live result.
