@@ -307,3 +307,67 @@ Started on 24 November 2026 after checking the previous exit gates. The starter 
 The PRD-08 exit gate passed locally. The first hosted GitHub Actions run at `e766984` passed all nine mock configuration checks in Chromium, Firefox, and WebKit. The job finished in 1 minute 8 seconds. [Hosted starter validation](https://github.com/samsaturn007-git/ReproStamp/actions/runs/45405766943)
 
 Live inference was verified with local Ollama. The optional hosted OpenAI path has simulated provider coverage from PRD-05 and no live result.
+
+## PRD-09 readiness
+
+Rechecked the starter exit gate on 24 November 2026 before adopting the archived proposal as the basis for active scope. [PRD-09 specification](prds/PRD-09-bounded-app-generation-and-evaluation.md) · [Archived PRD-09](reference/original_prd_pack/docs/PHASED_PRDS.md#prd-09--full-stack-app-generation-adaptive-context-and-ab-evaluation-p2)
+
+| Command or check | Observed result |
+| --- | --- |
+| `.venv/bin/python tests/prd08_exit_gate.py --cache .reprostamp/prd08-cache` | Field Notes, Studio Requests, and the extracted-source rerun each passed all 9 checks across Chromium, Firefox, and WebKit. Invalid configuration, incorrect approval, and receipt tampering were rejected. Evidence is in `.reprostamp/prd08-gates-gqdzmwt1/`. |
+| `env PATH=/usr/bin:/bin .venv/bin/reprostamp starter verify` on the three retained PRD-08 gate bundles and the live Ollama bundle | All four bundles verified 8 files each and reported passing validation. |
+| `docker ps -a --filter label=io.reprostamp.run --format '{{.Names}}'` | No ReproStamp workload containers remained after the gate. |
+| `shasum -a 256 -c CONTENTS_SHA256.txt` from `docs/reference/original_prd_pack` | All 10 archive checksums matched. |
+
+## PRD-09
+
+Implemented on 24 November 2026 using the approved scope derived from the archived proposal. The CLI generates one React and FastAPI task-tracker template with typed configuration and presentation patches. Exports include a command and preview manifest, MIT license, dependency locks, unit tests, and startup instructions. The independently maintained Playwright harness stays outside the export. [Active specification](prds/PRD-09-bounded-app-generation-and-evaluation.md) · [CLI workflow](../README.md#generate-a-task-tracker-with-a-bounded-patch) · [Evaluation](PRD09_EVALUATION.md)
+
+| Command or check | Observed result |
+| --- | --- |
+| `.venv/bin/python tests/prd08_exit_gate.py --cache .reprostamp/prd08-cache` after adding the v2 workflow | Both configurations and the extracted-source rerun passed all 9 checks. Earlier v1 receipts still verified offline. Evidence is in `.reprostamp/prd08-gates-l8t58_oi/`. |
+| Clean venv, `python -m pip install .`, and `python -m pip check` | Installed the generator assets and independent harness from the built package. Dependency consistency passed. |
+| `python tests/prd09_exit_gate.py --cache .reprostamp/prd08-cache` from the clean install | Passed sequentially. Golden plans passed 1 of 2 single-stage trials and 2 of 2 plan-and-review trials. The seeded incorrect empty-state message failed in three engines. Direct generation and extracted-source revalidation each passed all 12 browser checks and produced the same source SHA-256 as the benchmark export. The gate rejected unsupported stacks, file and script edits, a symlink, a modified dependency manifest, and the wrong approval digest. One changed file caused one index rebuild, and diagnostic text ranked it first. Evidence is in `.reprostamp/prd09-gates-8gj2e_ly/`. |
+| `shasum -a 256` on the three Field Notes archives and offline `reprostamp starter verify` | The three archives matched at `622415b97b9f1de5babc83ebf9278b48fefc0e5fade6497ef2c0292be47e4a1a`. The passing and seeded-failure receipts verified 8 and 14 files respectively and preserved their recorded outcomes. |
+| Startup and test commands in the extracted Field Notes export | Locked Python and Node installs, TypeScript, the Vite build, and all three unit and whitespace checks passed. Uvicorn served the frontend and returned HTTP 200 from `/api/health` on a free loopback port. Logs are in `.reprostamp/prd09-host-qshXST/`. |
+| `app generate --requirements examples/app/field-notes.txt --arm plan-review --ollama-model qwen2.5-coder:3b --planner-model qwen2.5-coder:1.5b` preview and matching `--approve` | The local provider reported 1,804 input and 214 output tokens across three calls. All 12 cross-browser checks passed. The experimental receipt verified 8 files without Docker or Node.js on `PATH`. Evidence is in `.reprostamp/prd09-generate-live-qkdqy6/`. |
+| `app benchmark --suite examples/app/evaluation.json --ollama-model qwen2.5-coder:3b --planner-model qwen2.5-coder:1.5b` with approval | The single-stage arm passed 0 of 2 and plan and review passed 1 of 2. The live suite recorded one incomplete trial due to a startup failure and two completed assertion failures. All four bundles verified with the same frozen harness digest. Evidence is in `.reprostamp/prd09-final-live-sOMXdS/`. The temporary Ollama server was stopped. |
+| `docker inspect` on the live app and harness | Both ran as `pwuser` with read-only roots. The app used the `none` network and the harness joined its network namespace. Only the harness mounted writable evidence. |
+| `python -m compileall -q src scripts tests`, `python -m pip check`, and `git diff --check` | Passed. |
+
+The first presentation test ran after the lifecycle test had inserted a task. The harness now checks the empty state first. Early live planner responses exceeded the search-term or output limit. The final planner uses a bounded vocabulary and 128 output tokens within the shared 512-token attempt budget. Follow-up runs retained the planner failures and startup failures as separate evidence.
+
+The local PRD-09 exit gate passed. Docker listed zero remaining ReproStamp workload containers. The GitHub Actions workflow includes the golden gate and has no hosted PRD-09 result yet.
+
+## PRD-10
+
+Chose the workflow engine comparison on 24 November 2026. The PostgreSQL arm uses the current production queue and worker. The Temporal arm runs one opt-in activity against the same registered checkout and pinned Linux runner. PRD-03 recovery and the PRD-09 local exit gate had already passed. The architecture decision retains PostgreSQL for production. [PRD-10 specification](prds/PRD-10-workflow-recovery-comparison.md) · [Timings and decision](ADR-PRD10-workflow-engine.md)
+
+| Command or check | Observed result |
+| --- | --- |
+| `python -m pip install -e '.[prd03]' -r experiments/prd10/requirements.txt` in a separate venv | Installed Temporal Python SDK 1.36.1 and passed `pip check`. The SDK's versioned download endpoint returned 404. The official CLI 1.8.3 GitHub release archive downloaded successfully and matched its published SHA-256. The CLI reported server 1.31.2. |
+| `python -m experiments.prd10.benchmark --temporal-cli .reprostamp/prd10-tools/temporal --out .reprostamp/prd10-20261124-203431` | Both controls and all four crash trials completed. Each crash recovered on generation two. PostgreSQL recorded lease expiry and Temporal recorded an activity heartbeat timeout. Every trial accepted one receipt and handled a duplicate submission without starting a second job. |
+| `env PATH=/usr/bin:/bin .venv/bin/reprostamp verify` on the six benchmark receipts and `reprostamp diff-receipts` on the first crash pair | All six bundles verified 13 files each. The diff reported matching inputs and case outcomes with the same `VERIFIED` verdict. |
+| `docker ps -a --filter label=io.reprostamp.run` and PostgreSQL and process checks after the benchmark | Zero workload containers remained. The dedicated experiment database was dropped and the loopback Temporal server stopped. The run retains raw timings, receipts, worker logs, and recovery histories. |
+| `.venv/bin/python tests/prd02_exit_gate.py` | Both three-browser fixture matrices, independent receipt replay, offline integrity checks, and missing or changed input diagnostics passed. Evidence is in `.reprostamp/prd02-gates-bwb0o6bm/`. |
+| `.venv/bin/python tests/prd03_exit_gate.py` | Passed migration, duplicate submission, owner authorization, cancellation, exhausted recovery, and expiry. The replacement worker recovered frozen inputs and fenced stale writes. The dashboard resumed at event 3, recovered 36 ordered events, and downloaded one receipt and one trace. Evidence is in `.reprostamp/prd03-gates-hyy8jkc8/`. |
+| `python -m compileall -q src scripts tests experiments/prd10` and `git diff --check` | Passed. |
+
+The local PRD-10 exit gate passed. PostgreSQL reached the replacement app in 10.34–10.78 seconds and Temporal in 11.68–12.21 seconds on this two-crash sample per engine. [Raw benchmark results](../.reprostamp/prd10-20261124-203431/report.json)
+
+## PRD-11
+
+Started on 24 November 2026 after checking the recorded PRD-09 and PRD-10 local exit gates. The hosted workflows use Linux AMD64 and the maintained fixture provisioners. The production build uses a packaged CLI and control plane, a locked Python and npm dependency set, and the PostgreSQL queue. [Release requirements](prds/PRD-11-hosted-demo-release-baseline.md) · [Install and reproduce](HOSTED_RELEASE.md)
+
+The release tag is pending successful hosted comparison and replay, durable dashboard recovery, production build, and both starter gates at the same commit.
+
+## Hosted demo roadmap
+
+Planned on 24 November 2026. PRD-11 through PRD-14 define the sequence for a public HTTPS demo using the approved checkout fixture. Implementation starts with the hosted release gate.
+
+| PRD | Open exit check |
+| --- | --- |
+| [PRD-11](prds/PRD-11-hosted-demo-release-baseline.md) | Tag the revision after hosted Linux AMD64 release validation. |
+| [PRD-12](prds/PRD-12-deploy-hosted-verifier.md) | Verify the hosted comparison and private owner access on an approved VM with DNS. |
+| [PRD-13](prds/PRD-13-public-checkout-demo.md) | Verify an anonymous live sample, reviewed evidence, and durable submission limits. |
+| [PRD-14](prds/PRD-14-github-and-demo-launch.md) | Verify the approved GitHub walkthrough, independent replay, recovery, and backup restore. |

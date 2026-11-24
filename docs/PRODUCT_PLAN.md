@@ -24,6 +24,12 @@ This plan and the numbered PRDs define the active build sequence. The [original 
 | [PRD-06 — Explain flakes and recurring failures](prds/PRD-06-flake-and-failure-analysis.md) | PRD-04. Can be built independently of PRD-05. |
 | [PRD-07 — Review visual and accessibility changes](prds/PRD-07-visual-accessibility-review.md) | PRD-04. |
 | [PRD-08 — Generate and validate an app starter](prds/PRD-08-verified-app-starter.md) | PRD-05. Optional extension that keeps the original prompt-to-app concept. |
+| [PRD-09 — Extend app generation and measure it](prds/PRD-09-bounded-app-generation-and-evaluation.md) | PRD-08. |
+| [PRD-10 — Compare workflow recovery](prds/PRD-10-workflow-recovery-comparison.md) | PRD-03. Optional platform research. |
+| [PRD-11 — Prepare the hosted demo release](prds/PRD-11-hosted-demo-release-baseline.md) | PRD-09 and PRD-10. Runs the PRD-02 and PRD-03 release gates. |
+| [PRD-12 — Deploy the verifier on a Linux VM](prds/PRD-12-deploy-hosted-verifier.md) | PRD-11. |
+| [PRD-13 — Let visitors run the checkout demo](prds/PRD-13-public-checkout-demo.md) | PRD-12. |
+| [PRD-14 — Connect GitHub and verify the public launch](prds/PRD-14-github-and-demo-launch.md) | PRD-13 and PRD-04. |
 
 ## Prior product research
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Provision and check the local PRD-03 development stack."""
+"""Provision and check the dashboard and PostgreSQL stack."""
 
 import argparse
 import hashlib
@@ -15,6 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DASHBOARD = ROOT / "dashboard"
 PASSWORD_FILE = ROOT / ".reprostamp/prd03/postgres-password"
+RELEASE_LOCK = ROOT / "requirements/hosted-release.lock"
 
 
 def run(*command: str, timeout: int = 180) -> None:
@@ -59,7 +60,9 @@ def check_dashboard() -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stop", action="store_true", help="stop PostgreSQL and preserve its data")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--stop", action="store_true", help="stop PostgreSQL and preserve its data")
+    mode.add_argument("--release", action="store_true", help="install the release package and locked dependencies")
     args = parser.parse_args()
     project = "reprostamp-prd03-" + hashlib.sha256(os.fsencode(ROOT)).hexdigest()[:12]
     compose = ("docker", "compose", "--progress", "quiet", "--project-name", project,
@@ -76,7 +79,13 @@ def main() -> None:
     if tuple(map(int, node.strip().split("."))) < (22, 12, 0):
         parser.error("Node.js 22.12 or newer is required.")
     run("docker", "compose", "version")
-    run(sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "-e", ".[prd03]")
+    install = (sys.executable, "-m", "pip", "install", "--disable-pip-version-check")
+    if args.release:
+        run(*install, "--only-binary=:all:", "-r", str(RELEASE_LOCK))
+        run(*install, "--no-build-isolation", "--constraint", str(RELEASE_LOCK), ".[prd03]")
+        run(sys.executable, "-m", "pip", "check")
+    else:
+        run(*install, "-e", ".[prd03]")
     run("npm", "--prefix", str(DASHBOARD), "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--include=dev")
 
     password = database_password()

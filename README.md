@@ -13,6 +13,8 @@ Use Git, Python 3.12+, Node.js 22.12+ with npm, and a running local Docker engin
 
 Setup installs `reprostamp` in `.venv` and checks that all three engines can load a loopback page in the pinned Playwright image. The fixture script creates the same two Git commits on each run and prewarms the npm cache for the app and harness inside the pinned Linux image. Provisioning can download public packages and the image. Comparisons use the local cache and loopback-only networking. [Playwright Docker documentation](https://playwright.dev/docs/docker) · [Docker none network driver](https://docs.docker.com/engine/network/drivers/none/)
 
+For the hosted demo, use the [release handoff](docs/HOSTED_RELEASE.md) to identify the tested revision and install it on Linux AMD64.
+
 ## Verify the checkout fix
 
 ```sh
@@ -267,4 +269,57 @@ For live inference, replace `--response-file` and its path with `--ollama-model 
 
 Run `.venv/bin/python tests/prd08_exit_gate.py --cache "$starter_cache"` to validate both configurations and rerun the tests from the extracted source. The `--mock-only` mode runs the checked-in deterministic example in CI. [PRD-08 specification](docs/prds/PRD-08-verified-app-starter.md)
 
-The [product plan](docs/PRODUCT_PLAN.md) lists all eight PRDs and their dependencies. The [original PRD pack](docs/reference/original_prd_pack/README.md) is retained for reference.
+## Generate a task tracker with a bounded patch
+
+The app generator extends the React, TypeScript, FastAPI, and SQLite starter with a list heading, empty-state message, and one of three palettes. It produces the same source archive for the same plan and template. The export includes the dependency locks, supported preview and commands in `app-manifest.json`, a license, unit tests, and a README. Validation runs the build, TypeScript, Python unit and lint checks, and the independent browser suite inside the pinned Linux runner. [Example plan](examples/app/field-notes.json)
+
+```sh
+app_cache=.reprostamp/app-cache
+app_out=".reprostamp/app-$(date +%Y%m%d-%H%M%S)"
+.venv/bin/reprostamp starter prepare --cache "$app_cache"
+.venv/bin/reprostamp app generate --plan examples/app/field-notes.json --cache "$app_cache" --out "$app_out"
+.venv/bin/reprostamp starter verify "$app_out/receipt.zip"
+```
+
+Extract `source.zip` into a fresh directory and follow its README to start the app locally. To rerun the independent checks, run `reprostamp app validate --source . --cache /path/to/app-cache --out ../app-rerun` from the extracted directory. Revalidation checks that the maintained source and locks match the generated plan. Screenshots, traces, and Playwright tests stay outside the export.
+
+To generate a plan with local Ollama, run the first command to inspect the request and the second command with the approval digest. The live receipt labels the result **experimental**. The generator writes only the typed application settings and can use reviewed diagnostics passed with `--failure` when choosing which template excerpts to include.
+
+```bash
+app_args=(
+  app generate --requirements examples/app/field-notes.txt
+  --ollama-model qwen2.5-coder:3b --cache "$app_cache" --out "${app_out}-live"
+)
+.venv/bin/reprostamp "${app_args[@]}"
+.venv/bin/reprostamp "${app_args[@]}" --approve PASTE_REVIEWED_APPROVAL_SHA256
+```
+
+### Run the paired evaluation
+
+The seeded suite gives both workflows the same requirements and grades the outputs against independent expected settings and browser checks. It records attempts, timings, provider usage, context bytes, and failure modes. The deterministic run uses scripted provider responses. Add `--ollama-model qwen2.5-coder:3b --planner-model qwen2.5-coder:1.5b` to preview a live run, then repeat that command with its approval digest. [Fixture suite](examples/app/evaluation.json) · [Evaluation results](docs/PRD09_EVALUATION.md)
+
+```sh
+.venv/bin/reprostamp app benchmark --suite examples/app/evaluation.json \
+  --cache "$app_cache" --out "${app_out}-benchmark"
+.venv/bin/python tests/prd09_exit_gate.py --cache "$app_cache"
+```
+
+[PRD-09 specification](docs/prds/PRD-09-bounded-app-generation-and-evaluation.md)
+
+## Compare worker recovery
+
+The optional workflow experiment pairs the production PostgreSQL worker with a local Temporal activity. Each runs the same independently maintained Chromium checkout comparison. The experiment records one control and two worker crashes per engine, then verifies the receipts offline. [PRD-10 specification](docs/prds/PRD-10-workflow-recovery-comparison.md) · [Results and architecture decision](docs/ADR-PRD10-workflow-engine.md)
+
+Use the prepared checkout fixture, the local dashboard PostgreSQL service, and the Temporal CLI 1.8.3 binary for your host. Verify the downloaded archive against the release's checksums. [Checkout setup](#local-setup) · [PostgreSQL setup](#run-the-local-dashboard) · [Temporal CLI 1.8.3 release](https://github.com/temporalio/cli/releases/tag/v1.8.3)
+
+```sh
+python3 -m venv .reprostamp/prd10-venv
+.reprostamp/prd10-venv/bin/python -m pip install -e '.[prd03]' -r experiments/prd10/requirements.txt
+.reprostamp/prd10-venv/bin/python -m experiments.prd10.benchmark \
+  --temporal-cli /path/to/temporal \
+  --out ".reprostamp/prd10-$(date +%Y%m%d-%H%M%S)"
+```
+
+The benchmark uses an isolated database on the local ReproStamp PostgreSQL service and an ephemeral Temporal dev server on loopback. It only submits the approved checkout fixture. The fresh output directory contains the measured timings, worker logs, PostgreSQL events, Temporal histories, and receipts.
+
+[Product plan](docs/PRODUCT_PLAN.md) · [Original PRD pack](docs/reference/original_prd_pack/README.md)

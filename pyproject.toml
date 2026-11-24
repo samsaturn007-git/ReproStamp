@@ -27,4 +27,4 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 reprostamp = ["starter_assets/image.txt", "starter_assets/template/*", "starter_assets/template/.gitignore",
-              "starter_assets/template/src/*", "starter_assets/harness/*"]
+              "starter_assets/template/src/*", "starter_assets/harness/*", "starter_assets/generator/*"]

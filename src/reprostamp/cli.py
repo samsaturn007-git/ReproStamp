@@ -295,6 +295,8 @@ def main(argv: list[str] | None = None) -> int:
     add_suggestion_command(commands)
     from .starter import add_starter_command
     add_starter_command(commands)
+    from .app import add_app_command
+    add_app_command(commands)
     args = parser.parse_args(argv)
     try:
         return args.handler(args)

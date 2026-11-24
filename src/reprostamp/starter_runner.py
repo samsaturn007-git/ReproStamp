@@ -21,6 +21,7 @@ HARNESS = ASSETS / "harness"
 IMAGE = (ASSETS / "image.txt").read_text(encoding="ascii").strip()
 ENGINES = ("chromium", "firefox", "webkit")
 CASE_IDS = ("api.health", "api.tasks", "browser.task-lifecycle")
+APP_CASE_IDS = (*CASE_IDS, "browser.presentation")
 SETTINGS = {"seed": 42, "locale": "en-US", "timezone": "UTC", "viewport_width": 1100, "viewport_height": 800}
 DEPENDENCIES = ("package.json", "package-lock.json", "requirements.lock")
 PIP = "26.1.1"
@@ -29,8 +30,9 @@ APP_COMMAND = COPY_AND_INSTALL + (
     f"PYTHONPATH=/python-cache/{PIP_WHEEL} python3 -m pip --isolated --disable-pip-version-check install "
     "--no-index --only-binary=:all: --find-links=/python-cache --target=/work/python -r requirements.lock; "
     "node node_modules/typescript/bin/tsc --noEmit; node node_modules/vite/bin/vite.js build; "
-    "PYTHONPATH=/work/python exec python3 -m uvicorn main:app --host 127.0.0.1 --port 4173"
 )
+SERVE = "PYTHONPATH=/work/python exec python3 -m uvicorn main:app --host 127.0.0.1 --port 4173"
+APP_UNIT = "PYTHONPATH=/work/python python3 -m unittest -v test_app; "
 
 
 def input_hash(root: Path, names: tuple[str, ...]) -> str:
@@ -96,7 +98,7 @@ def prepare_cache(cache: Path) -> None:
 
 
 def run_engine(engine: str, run_id: str, source: Path, config: StarterConfig, cache: Path,
-               harness: Path, temporary: Path, out: Path) -> dict:
+               harness: Path, temporary: Path, out: Path, *, presentation: dict | None = None) -> dict:
     started = time.monotonic()
     pair = IsolatedPair(60)
     output = out / engine
@@ -107,16 +109,20 @@ def run_engine(engine: str, run_id: str, source: Path, config: StarterConfig, ca
     phase = "startup"
     reason = detail = status = None
     npm_cache = cache / "npm/_cacache"
+    app_checks = APP_UNIT if presentation is not None else ""
+    presentation_env = [] if presentation is None else [
+        f"--env=REPROSTAMP_APP_PRESENTATION={json.dumps(presentation)}",
+    ]
     try:
         pair.create("app", pair.app, *container_args(pair.app, "none", run_id, source, npm_cache),
-                    "--mount", bind_mount(cache / "python", "/python-cache"), IMAGE, "sh", "-ec", APP_COMMAND)
+                    "--mount", bind_mount(cache / "python", "/python-cache"), IMAGE, "sh", "-ec", APP_COMMAND + app_checks + SERVE)
         pair.command("start", pair.app)
         pair.create("harness", pair.harness,
                     *container_args(pair.harness, f"container:{pair.app}", run_id, harness, npm_cache),
                     "--mount", bind_mount(evidence, "/evidence", read_only=False),
                     f"--env=REPROSTAMP_BROWSER_SETTINGS={json.dumps(SETTINGS)}", f"--env=REPROSTAMP_ENGINE={engine}",
                     f"--env=REPROSTAMP_STARTER_CONFIG={json.dumps(asdict(config), ensure_ascii=False)}",
-                    IMAGE, "sh", "-ec", HARNESS_SETUP + "exec " + FUNCTIONAL_COMMAND)
+                    *presentation_env, IMAGE, "sh", "-ec", HARNESS_SETUP + "exec " + FUNCTIONAL_COMMAND)
         pair.command("start", pair.harness)
         phase = "execution"
         status = pair.command("wait", pair.harness)
@@ -129,7 +135,8 @@ def run_engine(engine: str, run_id: str, source: Path, config: StarterConfig, ca
     cases, build = [], None
     if (evidence / "report.json").is_file():
         cases, build, report_reason, report_detail = read_report(
-            evidence, output, out, frozenset(CASE_IDS), engine, require_failure_artifacts=False,
+            evidence, output, out, frozenset(APP_CASE_IDS if presentation is not None else CASE_IDS), engine,
+            require_failure_artifacts=False,
         )
         if reason is None:
             reason, detail = report_reason, report_detail

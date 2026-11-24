@@ -1,0 +1,13 @@
+{
+  "stack": "react-fastapi",
+  "config": {
+    "project_name": "Field Notes",
+    "task_fields": ["description", "priority"],
+    "statuses": ["Inbox", "In progress", "Done"]
+  },
+  "presentation": {
+    "list_heading": "Field queue",
+    "empty_text": "No field notes yet.",
+    "palette": "ocean"
+  }
+}

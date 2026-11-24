@@ -1,0 +1,1 @@
+Build a local task tracker named Studio Requests. Enable due dates. Use the statuses Requested, Scheduled, Delivered, in order. Set the list heading to Production queue and the empty message to No studio requests yet. Use the plum palette.

@@ -1,6 +1,9 @@
 name: Task starter validation
 
-on: [push, pull_request]
+on:
+  push:
+    branches: ['**']
+  pull_request:
 
 permissions:
   contents: read
@@ -8,15 +11,34 @@ permissions:
 jobs:
   mock-starter:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
-          python-version: '3.12'
+          python-version: '3.12.16'
+      - name: Confirm checkout and platform
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')" = linux/amd64
       - name: Install ReproStamp
-        run: python -m pip install .
+        run: python -m pip install --constraint requirements/hosted-release.lock .
       - name: Validate the checked-in mock configuration
-        run: python tests/prd08_exit_gate.py --mock-only
+        run: python tests/prd08_exit_gate.py --mock-only --cache .reprostamp/ci-starter-cache
+      - name: Evaluate the bounded app generator
+        run: python tests/prd09_exit_gate.py --cache .reprostamp/ci-starter-cache
+      - name: Upload starter receipts and golden evaluation
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: starter-validation-${{ github.sha }}
+          include-hidden-files: true
+          if-no-files-found: ignore
+          path: |
+            .reprostamp/prd08-gates-*/field-notes/receipt.zip
+            .reprostamp/prd09-gates-*/benchmark/report.json
+            .reprostamp/prd09-gates-*/benchmark/*/*/receipt.zip
+            .reprostamp/prd09-gates-*/generated/receipt.zip
+            .reprostamp/prd09-gates-*/revalidated/receipt.zip

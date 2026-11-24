@@ -19,6 +19,19 @@ async function check(testInfo, assertion, run) {
   }
 }
 
+if (process.env.REPROSTAMP_APP_PRESENTATION) {
+  const presentation = JSON.parse(process.env.REPROSTAMP_APP_PRESENTATION);
+  test('browser.presentation', async ({ page }, info) => {
+    await check(info, 'requested_presentation', async () => {
+      await page.goto('/');
+      await expect(page.getByLabel('Status').locator('option')).toHaveText(config.statuses);
+      await expect(page.locator('#tasks-title')).toHaveText(presentation.list_heading);
+      await expect(page.locator('.empty')).toHaveText(presentation.empty_text);
+      await expect(page.locator('.masthead')).toHaveCSS('background-color', `rgb(${presentation.masthead_rgb.join(', ')})`);
+    });
+  });
+}
+
 test('api.health', async ({ request }, info) => {
   await check(info, 'health', async () => {
     const response = await request.get('/api/health');

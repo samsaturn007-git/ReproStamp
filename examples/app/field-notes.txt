@@ -1,0 +1,1 @@
+Build a local task tracker named Field Notes. Enable description and priority. Use the statuses Inbox, In progress, Done, in order. Set the list heading to Field queue and the empty message to No field notes yet. Use the ocean palette.

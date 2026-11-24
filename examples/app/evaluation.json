@@ -1,0 +1,109 @@
+{
+  "seed": 42,
+  "fixtures": [
+    {
+      "id": "field-notes",
+      "requirements": "field-notes.txt",
+      "expected": {
+        "stack": "react-fastapi",
+        "config": {
+          "project_name": "Field Notes",
+          "task_fields": [
+            "description",
+            "priority"
+          ],
+          "statuses": [
+            "Inbox",
+            "In progress",
+            "Done"
+          ]
+        },
+        "presentation": {
+          "list_heading": "Field queue",
+          "empty_text": "No field notes yet.",
+          "palette": "ocean"
+        }
+      },
+      "mock_draft": {
+        "stack": "react-fastapi",
+        "config": {
+          "project_name": "Field Notes",
+          "task_fields": [
+            "description",
+            "priority"
+          ],
+          "statuses": [
+            "Inbox",
+            "In progress",
+            "Done"
+          ]
+        },
+        "presentation": {
+          "list_heading": "Field queue",
+          "empty_text": "No field notes yet.",
+          "palette": "ocean"
+        }
+      },
+      "search_terms": [
+        "App",
+        "masthead",
+        "empty"
+      ],
+      "target_paths": [
+        "src/main.tsx",
+        "src/style.css"
+      ]
+    },
+    {
+      "id": "studio-requests",
+      "requirements": "studio-requests.txt",
+      "expected": {
+        "stack": "react-fastapi",
+        "config": {
+          "project_name": "Studio Requests",
+          "task_fields": [
+            "due_date"
+          ],
+          "statuses": [
+            "Requested",
+            "Scheduled",
+            "Delivered"
+          ]
+        },
+        "presentation": {
+          "list_heading": "Production queue",
+          "empty_text": "No studio requests yet.",
+          "palette": "plum"
+        }
+      },
+      "mock_draft": {
+        "stack": "react-fastapi",
+        "config": {
+          "project_name": "Studio Requests",
+          "task_fields": [
+            "due_date"
+          ],
+          "statuses": [
+            "Requested",
+            "Scheduled",
+            "Delivered"
+          ]
+        },
+        "presentation": {
+          "list_heading": "Production queue",
+          "empty_text": "No tasks yet.",
+          "palette": "plum"
+        }
+      },
+      "search_terms": [
+        "App",
+        "masthead",
+        "empty"
+      ],
+      "target_paths": [
+        "src/main.tsx",
+        "src/style.css"
+      ]
+    }
+  ]
+}

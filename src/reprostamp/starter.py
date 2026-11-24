@@ -7,7 +7,7 @@ import sys
 import tempfile
 import uuid
 import zipfile
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .integrity import canonical_json, hash_json
@@ -18,12 +18,27 @@ from .receipt_schema import SHA256, enum, integer, record, string, validate_arti
 from .repair import save_metadata
 from .runner import ARTIFACT_NAMES, DockerError, freeze_harness, runner_platform
 from .starter_config import CONFIG_LIMIT, FORMAT, StarterConfig
-from .starter_runner import CASE_IDS, DEPENDENCIES, ENGINES, HARNESS, IMAGE, SETTINGS, TEMPLATE, check_cache, input_hash, prepare_cache, run_engine
+from .starter_runner import (
+    APP_CASE_IDS, CASE_IDS, DEPENDENCIES, ENGINES, HARNESS, IMAGE, SETTINGS, TEMPLATE,
+    check_cache, input_hash, prepare_cache, run_engine,
+)
 
 
 TEMPLATE_ID = "task-tracker/v1"
+APP_TEMPLATE_ID = "task-tracker/v2"
 SOURCE_FILES = (*DEPENDENCIES, ".gitignore", "README.md", "index.html", "main.py", "tsconfig.json",
                 "src/main.tsx", "src/style.css", "starter.json")
+
+
+@dataclass(frozen=True)
+class AppValidation:
+    source_files: tuple[str, ...]
+    app_plan_sha256: str
+    oracle_plan_sha256: str
+    origin: str
+    oracle_config: StarterConfig
+    presentation: dict
+    frozen_harness: Path | None
 
 
 def add_starter_command(commands) -> None:
@@ -148,15 +163,22 @@ def validation_result(runs: list[dict]) -> str:
 
 
 def validate_receipt(payload: dict) -> None:
+    is_app = payload.get("template") == APP_TEMPLATE_ID
+    app_fields = " app_plan_sha256 oracle_plan_sha256 origin" if is_app else ""
     record(payload, "kind template config_sha256 runner_image runner_platform harness_sha256 browser_settings checks "
-           "result runs artifacts", "starter validation payload")
+           "result runs artifacts" + app_fields, "starter validation payload")
     enum(payload["kind"], ("starter_validation",), "receipt kind")
-    enum(payload["template"], (TEMPLATE_ID,), "template")
+    enum(payload["template"], (TEMPLATE_ID, APP_TEMPLATE_ID), "template")
+    case_ids = APP_CASE_IDS if is_app else CASE_IDS
+    if is_app:
+        for key in ("app_plan_sha256", "oracle_plan_sha256"):
+            string(payload[key], key, SHA256)
+        enum(payload["origin"], ("golden", "experimental", "revalidation"), "app generation origin")
     for key in ("config_sha256", "harness_sha256"):
         string(payload[key], key, SHA256)
     string(payload["runner_image"], "runner image")
     string(payload["runner_platform"], "runner platform")
-    if payload["browser_settings"] != SETTINGS or payload["checks"] != list(CASE_IDS):
+    if payload["browser_settings"] != SETTINGS or payload["checks"] != list(case_ids):
         raise ValueError("Unexpected starter validation plan.")
     runs = payload["runs"]
     if not isinstance(runs, list) or len(runs) != len(ENGINES):
@@ -185,7 +207,7 @@ def validate_receipt(payload: dict) -> None:
         for check in run["checks"]:
             record(check, "case_id status playwright_status duration_ms assertion artifacts detail application_location", "starter check")
             case_id = check["case_id"]
-            enum(case_id, CASE_IDS, "starter check ID")
+            enum(case_id, case_ids, "starter check ID")
             if case_id in seen:
                 raise ValueError("Duplicate starter check.")
             seen.add(case_id)
@@ -194,7 +216,7 @@ def validate_receipt(payload: dict) -> None:
             integer(check["duration_ms"], 0, 2**53 - 1, "check duration")
             paths.update(validate_artifact_paths(check["artifacts"],
                          {kind: f"{engine}/{case_id}/{name}" for kind, name in ARTIFACT_NAMES.items()}, "starter check"))
-        if completed and seen != set(CASE_IDS):
+        if completed and seen != set(case_ids):
             raise ValueError("A completed starter run must record all expected checks.")
     enum(payload["result"], (validation_result(runs),), "validation result")
     manifest = payload["artifacts"]
@@ -206,12 +228,17 @@ def validate_receipt(payload: dict) -> None:
         integer(file["size"], 0, 2**53 - 1, "artifact size")
 
 
-def validate_source(source: Path, config: StarterConfig, cache: Path, platform: str, out: Path, temporary: Path) -> int:
-    harness = temporary / "harness"
-    freeze_harness(HARNESS, harness)
+def validate_source(source: Path, config: StarterConfig, cache: Path, platform: str, out: Path, temporary: Path,
+                    *, app: AppValidation | None = None) -> int:
+    case_ids = APP_CASE_IDS if app else CASE_IDS
+    source_files = app.source_files if app else SOURCE_FILES
+    harness = app.frozen_harness if app else None
+    if harness is None:
+        harness = temporary / "harness"
+        freeze_harness(HARNESS, harness)
     harness_hash = input_hash(harness, tuple(path.name for path in harness.iterdir()))
     with zipfile.ZipFile(out / "source.zip", "x", compression=zipfile.ZIP_DEFLATED) as archive:
-        for filename in sorted(SOURCE_FILES):
+        for filename in sorted(source_files):
             member = zipfile.ZipInfo(filename)
             member.compress_type = zipfile.ZIP_DEFLATED
             member.external_attr = (stat.S_IFREG | 0o644) << 16
@@ -219,15 +246,21 @@ def validate_source(source: Path, config: StarterConfig, cache: Path, platform: 
     run_id = f"starter-{uuid.uuid4().hex}"
     runs = []
     artifacts = {"receipt.md", "source.zip"}
-    lines = ["# ReproStamp starter validation", "", "[Download source](source.zip)", "",
-             "| Browser | Build | Execution | Health | Task CRUD | Browser journey |",
-             "| --- | --- | --- | --- | --- | --- |"]
+    headings = ["Browser", "Build", "Execution", "Health", "Task CRUD", "Browser journey"]
+    if app:
+        headings.append("Presentation")
+    lines = ["# ReproStamp starter validation", "", "[Download source](source.zip)", ""]
+    if app:
+        lines.extend([f"Origin **{app.origin}**.", "",
+                      "Build, TypeScript, Python unit and lint output is in each app log.", ""])
+    lines.extend(["| " + " | ".join(headings) + " |", "| " + " | ".join(["---"] * len(headings)) + " |"])
     for engine in ENGINES:
-        run = run_engine(engine, run_id, source, config, cache, harness, temporary, out)
+        run = run_engine(engine, run_id, source, app.oracle_config if app else config, cache, harness, temporary, out,
+                         presentation=app.presentation if app else None)
         runs.append(run)
         checks = {check["case_id"]: check["status"] for check in run["checks"]}
         version = (run["browser_build"] or {}).get("version", "Unavailable")
-        states = [checks.get(case, "missing") for case in CASE_IDS]
+        states = [checks.get(case, "missing") for case in case_ids]
         lines.append("| " + " | ".join([engine, version, run["execution_state"], *states]) + " |")
         print(f"{engine} {version} · {run['execution_state']} · {', '.join(states)}", flush=True)
         artifacts.update(run["logs"].values())
@@ -236,10 +269,13 @@ def validate_source(source: Path, config: StarterConfig, cache: Path, platform: 
     result = validation_result(runs)
     lines += ["", f"Validation **{result}**.", "", "See [receipt.json](receipt.json) for check evidence and hashes.", ""]
     (out / "receipt.md").write_text("\n".join(lines), encoding="utf-8")
-    export_bundle(out, {"kind": "starter_validation", "template": TEMPLATE_ID, "config_sha256": hash_json(asdict(config)),
-                        "runner_image": IMAGE, "runner_platform": platform, "harness_sha256": harness_hash,
-                        "browser_settings": SETTINGS, "checks": list(CASE_IDS), "result": result, "runs": runs},
-                  artifacts, validate_receipt)
+    payload = {"kind": "starter_validation", "template": APP_TEMPLATE_ID if app else TEMPLATE_ID,
+               "config_sha256": hash_json(asdict(config)), "runner_image": IMAGE, "runner_platform": platform,
+               "harness_sha256": harness_hash, "browser_settings": SETTINGS, "checks": list(case_ids),
+               "result": result, "runs": runs}
+    if app:
+        payload.update(origin=app.origin, app_plan_sha256=app.app_plan_sha256, oracle_plan_sha256=app.oracle_plan_sha256)
+    export_bundle(out, payload, artifacts, validate_receipt)
     print(f"Starter validation {result}. Source and receipt saved in {out}.")
     return {"passed": 0, "failed": 1, "incomplete": 3}[result]
 
