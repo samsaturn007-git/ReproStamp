@@ -67,6 +67,16 @@ class BrowserBuild:
     version: str
     platform: str
 
+    @classmethod
+    def from_report(cls, report: dict, engine: str) -> "BrowserBuild":
+        if report["engine"] != engine:
+            raise ValueError(f"Expected an observed {engine} build.")
+        version, platform = report["version"], report["platform"]
+        if any(not isinstance(field, str) or not field.strip() for field in (version, platform)):
+            raise ValueError("Invalid browser build metadata.")
+        # Node reports x64 for the Linux AMD64 architecture reported by Docker.
+        return cls(version, "linux/amd64" if platform == "linux/x64" else platform)
+
 
 @dataclass(frozen=True)
 class Attempt:
@@ -190,12 +200,9 @@ def read_report(
         report = json.loads((source / "report.json").read_text(encoding="utf-8"))
         builds = report.get("builds", [])
         if builds:
-            if len(builds) != 1 or builds[0]["engine"] != engine:
+            if len(builds) != 1:
                 raise ValueError(f"Expected one observed {engine} build, received {builds!r}.")
-            version, platform = builds[0]["version"], builds[0]["platform"]
-            if any(not isinstance(field, str) or not field.strip() for field in (version, platform)):
-                raise ValueError("Invalid browser build metadata.")
-            build = BrowserBuild(version, platform)
+            build = BrowserBuild.from_report(builds[0], engine)
         seen = set()
         for entry in report["cases"]:
             case_id = entry["case_id"]

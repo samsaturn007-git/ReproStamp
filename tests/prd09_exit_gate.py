@@ -77,6 +77,7 @@ def receipt(directory, *, result="passed"):
     assert [run["engine"] for run in payload["runs"]] == list(ENGINES)
     for run in payload["runs"]:
         assert run["execution_state"] == "completed"
+        assert run["browser_build"]["platform"] == payload["runner_platform"]
         assert len(run["checks"]) == len(APP_CASE_IDS)
         assert "Ran 3 tests" in (directory / run["logs"]["app"]).read_text()
     return payload

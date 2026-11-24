@@ -359,6 +359,8 @@ The local PRD-10 exit gate passed. PostgreSQL reached the replacement app in 10.
 
 Started on 24 November 2026 after checking the recorded PRD-09 and PRD-10 local exit gates. The hosted workflows use Linux AMD64 and the maintained fixture provisioners. The production build uses a packaged CLI and control plane, a locked Python and npm dependency set, and the PostgreSQL queue. [Release requirements](prds/PRD-11-hosted-demo-release-baseline.md) · [Install and reproduce](HOSTED_RELEASE.md)
 
+The first hosted comparison at `313cf0e0bbe1d2fc15ce19cd64d69875a3c3bb6f` completed all 12 checkout attempts with the expected assertion outcomes. Its receipt recorded `INCONCLUSIVE` because Node named the browser platform `linux/x64` and Docker named the runner platform `linux/amd64`. Browser report ingestion now maps the Node alias to Docker's platform name for functional tests, route reviews, and starter receipts. The initial bundle still verifies offline with its recorded verdict. [Initial hosted run](https://github.com/samsaturn007-git/ReproStamp/actions/runs/45439522482)
+
 The release tag is pending successful hosted comparison and replay, durable dashboard recovery, production build, and both starter gates at the same commit.
 
 ## Hosted demo roadmap

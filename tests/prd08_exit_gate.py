@@ -34,6 +34,7 @@ def check_export(output, config):
     assert [run["engine"] for run in payload["runs"]] == list(ENGINES)
     for run in payload["runs"]:
         assert run["execution_state"] == "completed" and run["browser_build"]["version"]
+        assert run["browser_build"]["platform"] == payload["runner_platform"]
         assert {check["case_id"]: check["status"] for check in run["checks"]} == dict.fromkeys(CASE_IDS, "passed")
     with (output / "source.zip").open("rb") as source:
         assert hash_file(source) == payload["artifacts"]["source.zip"]["sha256"]

@@ -52,7 +52,9 @@ def read_capture(directory: Path, build: BrowserBuild, engine: str, routes: set[
     if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 3 * 1024 * 1024:
         raise ValueError("The review report must be a regular file within its size limit.")
     data = json.loads(report.read_text(encoding="utf-8"))
-    if data["browser"] != {"engine": engine, **asdict(build)}:
+    browser = data["browser"]
+    if (not isinstance(browser, dict) or browser.keys() != {"engine", "version", "platform"}
+            or BrowserBuild.from_report(browser, engine) != build):
         raise ValueError("The review browser build differs from the functional attempt.")
     version = data["axe_version"]
     if not isinstance(version, str) or not AXE_VERSION.fullmatch(version):
